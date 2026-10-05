@@ -13,8 +13,16 @@
 *.pfx
 id_rsa*
 id_ed25519*
-secrets.*
-credentials.*
+# Fichiers de secrets courants (noms précis : un motif trop large comme
+# « secrets.* » ignorerait aussi notre code source rules/secrets.py).
+secrets.json
+secrets.yaml
+secrets.yml
+secrets.toml
+secrets.env
+credentials.json
+credentials.yaml
+credentials.yml
 *.secret
 
 # --- Python ----------------------------------------------------------------------
