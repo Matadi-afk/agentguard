@@ -42,7 +42,7 @@ jobs:
 
       - name: Installer le projet et les outils de dev
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools
           python -m pip install -e ".[dev]"
 
       - name: Contrôles pre-commit (gitleaks, ruff…)
