@@ -1,0 +1,22 @@
+{
+  "_comment": "DEMO FILE - the secure version of examples/vulnerable-mcp/mcp.json.",
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github@2025.4.8"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "files": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.8.21", "./workspace"]
+    },
+    "remote-tools": {
+      "url": "https://mcp.example.com/sse",
+      "headers": {
+        "Authorization": "Bearer ${env:REMOTE_TOOLS_TOKEN}"
+      }
+    }
+  }
+}

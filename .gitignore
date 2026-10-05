@@ -1,0 +1,45 @@
+# =============================================================================
+# .gitignore : liste des fichiers que Git ne doit JAMAIS envoyer sur GitHub.
+# Il doit exister AVANT le premier commit.
+# =============================================================================
+
+# --- 🔐 SECRETS : la section la plus importante --------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+secrets.*
+credentials.*
+*.secret
+
+# --- Python ----------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Résultats de scan (peuvent contenir des chemins ou infos sensibles) --------
+*.sarif
+agentguard-report.*
+
+# --- Systèmes et éditeurs ------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+# On partage la config VS Code du projet, mais pas les réglages perso.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json

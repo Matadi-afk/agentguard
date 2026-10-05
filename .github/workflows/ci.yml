@@ -1,0 +1,86 @@
+# =============================================================================
+# Intégration continue : à chaque push / pull request, GitHub vérifie
+# automatiquement le code (secrets, qualité, tests, vulnérabilités).
+#
+# Sécurité appliquée ici :
+#  - permissions minimales (lecture seule par défaut) ;
+#  - actions figées par leur empreinte SHA (immuable) et pas par un tag ;
+#  - aucun secret utilisé ni nécessaire.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, secrets & tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # historique complet : gitleaks scanne tous les commits
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Installer le projet et les outils de dev
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Contrôles pre-commit (gitleaks, ruff…)
+        run: pre-commit run --all-files --show-diff-on-failure
+
+      - name: Tests
+        run: pytest
+
+      - name: Audit des dépendances (vulnérabilités connues)
+        run: pip-audit --skip-editable
+
+  dogfooding:
+    # On utilise notre propre outil sur notre propre code.
+    name: agentguard scanne agentguard
+    runs-on: ubuntu-latest
+    needs: checks
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write # nécessaire pour publier le rapport SARIF
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Installer agentguard
+        run: python -m pip install .
+
+      - name: Scanner le dépôt
+        run: agentguard scan . --exclude "examples/*" --format sarif --output agentguard.sarif
+
+      - name: Publier les résultats dans l'onglet Security de GitHub
+        if: always()
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: agentguard.sarif
+          category: agentguard

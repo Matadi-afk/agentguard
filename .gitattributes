@@ -1,0 +1,4 @@
+# Fins de ligne normalisées (évite les soucis Windows <-> Linux).
+* text=auto eol=lf
+*.png binary
+*.gif binary
