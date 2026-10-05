@@ -44,8 +44,8 @@ dev = [
 agentguard = "agentguard.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/CHANGE-MOI/agentguard"
-Issues = "https://github.com/CHANGE-MOI/agentguard/issues"
+Homepage = "https://github.com/Matadi-afk/agentguard"
+Issues = "https://github.com/Matadi-afk/agentguard/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentguard"]

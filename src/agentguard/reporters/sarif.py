@@ -70,7 +70,7 @@ def render_sarif(result: ScanResult, **_: object) -> str:
                     "driver": {
                         "name": "agentguard",
                         "version": __version__,
-                        "informationUri": "https://github.com/CHANGE-MOI/agentguard",
+                        "informationUri": "https://github.com/Matadi-afk/agentguard",
                         "rules": rules,
                     }
                 },

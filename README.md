@@ -2,7 +2,7 @@
 
 **Security scanner for AI agent configurations.** Finds hardcoded secrets, dangerous MCP server setups and supply-chain risks before they reach production.
 
-[![CI](https://github.com/CHANGE-MOI/agentguard/actions/workflows/ci.yml/badge.svg)](https://github.com/CHANGE-MOI/agentguard/actions/workflows/ci.yml)
+[![CI](https://github.com/Matadi-afk/agentguard/actions/workflows/ci.yml/badge.svg)](https://github.com/Matadi-afk/agentguard/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 

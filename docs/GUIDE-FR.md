@@ -112,7 +112,7 @@ git rm --cached fuite_test.txt
 
 ## Étape 8 : Personnaliser le projet
 
-Avec `Ctrl+Shift+H` (rechercher/remplacer dans tout le projet), remplace `CHANGE-MOI` par ton pseudo GitHub.
+✅ Fait : les liens du projet (README, `pyproject.toml`, rapport SARIF) pointent vers `github.com/Matadi-afk/agentguard`.
 
 ## Étape 9 : Premier commit
 
