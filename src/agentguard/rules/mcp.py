@@ -128,7 +128,7 @@ _BROAD_PATHS = {"/", "~", "$HOME", "${HOME}", "${userHome}", "C:", "%USERPROFILE
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}  # noqa: S104 (liste de comparaison)
 
 # AG106 : moteurs de conteneurs et options qui cassent l'isolation.
-_CONTAINER_ENGINES = {"docker", "podman"}
+_CONTAINER_ENGINES = {"docker", "podman", "nerdctl"}
 _HOST_NAMESPACE_FLAGS = {"--network", "--net", "--pid", "--ipc", "--uts", "--userns"}
 _MOUNT_FLAGS = {"-v", "--volume"}
 _DANGEROUS_CAPABILITIES = {"ALL", "SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "NET_ADMIN"}

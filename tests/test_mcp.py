@@ -129,6 +129,11 @@ def test_each_dangerous_option_is_reported(write_mcp) -> None:
     assert rule_ids(write_mcp({"c": {"command": "podman", "args": args}})) == ["AG106", "AG106"]
 
 
+def test_nerdctl_is_checked(write_mcp) -> None:
+    args = ["run", "--privileged", "mcp/server:1.0"]
+    assert rule_ids(write_mcp({"c": {"command": "nerdctl", "args": args}})) == ["AG106"]
+
+
 @pytest.mark.parametrize(
     "safe",
     [
