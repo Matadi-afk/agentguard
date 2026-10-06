@@ -14,19 +14,36 @@ AI agents (Claude, Cursor, VS Code Copilot…) are increasingly wired to tools t
 
 ## Quick start
 
+Requires Python 3.10+. The package is not on PyPI yet: install a tagged release from GitHub.
+
 ```bash
-pip install agentguard        # coming soon on PyPI; for now: pip install .
+pip install "git+https://github.com/Matadi-afk/agentguard@v0.2.0"
 agentguard scan .
 ```
 
+### Try it on the bundled example
+
+```bash
+git clone https://github.com/Matadi-afk/agentguard
+cd agentguard
+pip install .
+agentguard scan examples/vulnerable-mcp   # 10 findings
+agentguard scan examples/safe-mcp         # the fixed version: no issues
+```
+
 ```text
-[CRITICAL] AG001 Hardcoded secret
-    app/config.py:12  GitHub token found: ghp_****…(40 chars)
-    Fix: Revoke the key immediately in the provider dashboard…
+[HIGH] AG106 MCP server container escapes isolation
+    mcp.json:25  Server 'sandbox' runs a container with a mount of '/var/run/docker.sock'.
+    Fix: Remove --privileged, host namespaces and mounts of '/', the home directory or the Docker socket. ...
 
 [HIGH] AG101 MCP server runs through a shell
-    mcp.json:16  Server 'helper' executes commands through 'bash'.
+    mcp.json:15  Server 'helper' executes commands through 'bash'.
+    Fix: Call the server binary directly instead of `bash -c` / `cmd /c`. ...
+
+Scanned 1 file(s), skipped 0. 10 finding(s): 0 critical, 8 high, 2 medium, 0 low.
 ```
+
+Every value in `examples/` is a fake placeholder.
 
 ## Rules
 
@@ -57,13 +74,26 @@ Exit codes: `0` nothing at or above `--fail-on`, `1` findings, `2` usage error.
 ### GitHub Actions
 
 ```yaml
-- run: pip install agentguard
-- run: agentguard scan . --format sarif --output agentguard.sarif
-- uses: github/codeql-action/upload-sarif@v4
-  if: always()
-  with:
-    sarif_file: agentguard.sarif
+jobs:
+  agentguard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # needed to upload SARIF results
+    steps:
+      - uses: actions/checkout@v4   # pin actions to a commit SHA in production
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install "git+https://github.com/Matadi-afk/agentguard@v0.2.0"
+      - run: agentguard scan . --format sarif --output agentguard.sarif
+      - uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: agentguard.sarif
 ```
+
+Results then appear in the repository's **Security → Code scanning** tab.
 
 ## Development
 
@@ -74,7 +104,7 @@ pre-commit install
 pytest
 ```
 
-See [SECURITY.md](SECURITY.md) to report a vulnerability.
+See [CHANGELOG.md](CHANGELOG.md) for release notes and [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## License
 

@@ -92,5 +92,5 @@ agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 
 ## État du projet
 
-- Version 0.1.0 (MVP) + règles AG106-AG108. 97 tests.
+- Version 0.2.0 (10 règles). 98 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
 - Cap fixé jusqu'au 4 novembre 2026 : publier sur GitHub, ajouter 3 règles, faire un premier post. Voir `IDEES.md` pour ce qui est volontairement mis de côté.

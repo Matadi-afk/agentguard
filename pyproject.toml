@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentguard"
-version = "0.1.0"
+version = "0.2.0"
 description = "Security scanner for AI agent configurations (MCP servers, secrets, supply chain)."
 readme = "README.md"
 license = "Apache-2.0"
@@ -49,6 +49,22 @@ Issues = "https://github.com/Matadi-afk/agentguard/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentguard"]
+
+# Sécurité : liste BLANCHE des fichiers de l'archive source (sdist).
+# Sans elle, tout fichier local non ignoré par Git (notes, exports, .env mal
+# nommé…) pourrait partir dans le paquet publié.
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/examples",
+  "/docs",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/SECURITY.md",
+  "/LICENSE",
+  "/pyproject.toml",
+]
 
 # -----------------------------------------------------------------------------
 # Ruff : vérifie la qualité ET la sécurité du code (règles "S" = Bandit).
