@@ -33,8 +33,8 @@ git --version
 Chaque commit publié contient un nom et un e-mail, visibles par tous. Utilise **l'adresse masquée fournie par GitHub** : GitHub → *Settings → Emails* → coche **« Keep my email addresses private »** et copie l'adresse `…@users.noreply.github.com`. Coche aussi **« Block command line pushes that expose my email »**.
 
 ```bash
-git config --global user.name "TonPseudo"
-git config --global user.email "12345678+TonPseudo@users.noreply.github.com"
+git config --global user.name "Dahan"
+git config --global user.email "12345678+Matadi-afk@users.noreply.github.com"   # 12345678 = ton numéro (Settings → Emails)
 git config --global init.defaultBranch main
 ```
 ✅ **Vérification :** `git config --global user.email` affiche l'adresse noreply.
@@ -78,7 +78,7 @@ pytest
 agentguard scan examples/vulnerable-mcp
 agentguard scan examples/safe-mcp
 ```
-✅ **Vérification :** `67 passed` ; 6 problèmes sur l'exemple vulnérable ; `No issues found.` sur l'exemple sécurisé.
+✅ **Vérification :** `97 passed` ; 10 problèmes sur l'exemple vulnérable ; `No issues found.` sur l'exemple sécurisé.
 
 **Astuce VS Code :** l'onglet *Testing* (icône en forme de fiole) liste et lance les tests. Avec `F5`, tu lances l'outil en mode débogage et tu peux poser des points d'arrêt.
 
@@ -127,7 +127,7 @@ git commit -m "Initial commit: agentguard scanner MVP"
 1. Sur GitHub : **+ → New repository**, nom `agentguard`, **Public**. Ne coche rien (ni README ni licence : on les a déjà).
 2. Dans le terminal :
    ```bash
-   git remote add origin https://github.com/TonPseudo/agentguard.git
+   git remote add origin https://github.com/Matadi-afk/agentguard.git
    git push -u origin main
    ```
 3. Une fenêtre de connexion GitHub s'ouvre (Git Credential Manager) : connecte-toi via le navigateur.

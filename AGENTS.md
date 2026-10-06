@@ -24,10 +24,10 @@ src/agentguard/
   rules/
     __init__.py     ALL_RULES = liste de toutes les règles
     secrets.py      AG001 : secrets en clair (regex par fournisseur)
-    mcp.py          AG100-AG105 : configurations MCP dangereuses
+    mcp.py          AG100-AG108 : configurations MCP dangereuses
   reporters/        text.py, json_reporter.py, sarif.py (+ RENDERERS dans __init__)
 tests/              pytest ; conftest.py fournit fake_secret() et la fixture write_mcp
-examples/           vulnerable-mcp/ (doit déclencher AG101-AG105) et safe-mcp/ (doit rester propre)
+examples/           vulnerable-mcp/ (doit déclencher AG101-AG108) et safe-mcp/ (doit rester propre)
 docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macOS)
 ```
 
@@ -42,8 +42,11 @@ docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macO
 | AG103 | high | rules/mcp.py | Secret littéral dans `env` ou `headers` |
 | AG104 | high | rules/mcp.py | Serveur filesystem ouvert sur `/`, `~`, `C:\` |
 | AG105 | high | rules/mcp.py | Serveur distant en `http://` |
+| AG106 | high | rules/mcp.py | Conteneur Docker/Podman qui casse l'isolation (`--privileged`, `=host`, montage de `/` ou du socket Docker…) |
+| AG107 | high | rules/mcp.py | Paquet installé depuis git ou une URL (remplace AG102 pour ce paquet) |
+| AG108 | medium | rules/mcp.py | Outils approuvés sans confirmation (`alwaysAllow`, `autoApprove`, `trust: true`) |
 
-Prochain ID libre : **AG002** (secrets) ou **AG106** (MCP).
+Prochain ID libre : **AG002** (secrets) ou **AG109** (MCP).
 
 ## Commandes
 
@@ -54,7 +57,7 @@ pip install -e ".[dev]"                     # installation (une fois)
 pytest                                      # tests
 ruff check . && ruff format .               # qualité + sécurité (règles Bandit "S")
 pre-commit run --all-files                  # tous les contrôles, dont gitleaks
-agentguard scan examples/vulnerable-mcp     # démo : 6 constats attendus
+agentguard scan examples/vulnerable-mcp     # démo : 10 constats attendus
 agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 ```
 
@@ -89,5 +92,5 @@ agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 
 ## État du projet
 
-- Version 0.1.0 (MVP). 67 tests.
+- Version 0.1.0 (MVP) + règles AG106-AG108. 97 tests.
 - Cap fixé jusqu'au 4 novembre 2026 : publier sur GitHub, ajouter 3 règles, faire un premier post. Voir `IDEES.md` pour ce qui est volontairement mis de côté.

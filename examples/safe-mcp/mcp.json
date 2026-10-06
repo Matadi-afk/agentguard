@@ -17,6 +17,14 @@
       "headers": {
         "Authorization": "Bearer ${env:REMOTE_TOOLS_TOKEN}"
       }
+    },
+    "sandbox": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-v", "./workspace:/workspace:ro", "mcp/sandbox:1.0"]
+    },
+    "notes": {
+      "command": "npx",
+      "args": ["-y", "notes-mcp@1.2.0"]
     }
   }
 }

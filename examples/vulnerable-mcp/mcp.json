@@ -21,6 +21,15 @@
       "headers": {
         "Authorization": "Bearer fake-bearer-value"
       }
+    },
+    "sandbox": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--privileged", "-v", "/var/run/docker.sock:/var/run/docker.sock", "mcp/sandbox:1.0"]
+    },
+    "notes": {
+      "command": "npx",
+      "args": ["-y", "github:someone/notes-mcp"],
+      "alwaysAllow": ["write_note", "delete_note"]
     }
   }
 }

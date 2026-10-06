@@ -71,6 +71,34 @@ INSECURE_TRANSPORT = Rule(
     remediation="Use https:// so tokens and data cannot be intercepted.",
 )
 
+DANGEROUS_CONTAINER = Rule(
+    id="AG106",
+    title="MCP server container escapes isolation",
+    severity=Severity.HIGH,
+    remediation=(
+        "Remove --privileged, host namespaces and mounts of '/', the home directory or the "
+        "Docker socket. Mount only the project folder the server needs, read-only if possible."
+    ),
+)
+UNTRUSTED_PACKAGE_SOURCE = Rule(
+    id="AG107",
+    title="MCP package installed from an unverified source",
+    severity=Severity.HIGH,
+    remediation=(
+        "Install the server from the official registry (npm / PyPI) with a pinned version. "
+        "A git repository or URL can change at any time and bypasses registry checks."
+    ),
+)
+AUTO_APPROVED_TOOLS = Rule(
+    id="AG108",
+    title="MCP tools run without user confirmation",
+    severity=Severity.MEDIUM,
+    remediation=(
+        "Remove `alwaysAllow` / `autoApprove` / `trust: true`, or limit it to read-only tools. "
+        "Confirmation is the last barrier against a prompt-injected agent."
+    ),
+)
+
 RULES = [
     INVALID_CONFIG,
     SHELL_EXECUTION,
@@ -78,6 +106,9 @@ RULES = [
     HARDCODED_ENV_SECRET,
     BROAD_FILESYSTEM,
     INSECURE_TRANSPORT,
+    DANGEROUS_CONTAINER,
+    UNTRUSTED_PACKAGE_SOURCE,
+    AUTO_APPROVED_TOOLS,
 ]
 
 # --- Constantes de détection ---------------------------------------------------
@@ -95,6 +126,27 @@ _SENSITIVE_KEY = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT|AUTH|CREDENT
 _ENV_REFERENCE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z0-9_:.]*\}?$|^\$\{(env|input):.+\}$")
 _BROAD_PATHS = {"/", "~", "$HOME", "${HOME}", "${userHome}", "C:", "%USERPROFILE%"}
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}  # noqa: S104 (liste de comparaison)
+
+# AG106 : moteurs de conteneurs et options qui cassent l'isolation.
+_CONTAINER_ENGINES = {"docker", "podman"}
+_HOST_NAMESPACE_FLAGS = {"--network", "--net", "--pid", "--ipc", "--uts", "--userns"}
+_MOUNT_FLAGS = {"-v", "--volume"}
+_DANGEROUS_CAPABILITIES = {"ALL", "SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "NET_ADMIN"}
+_SENSITIVE_MOUNT_SOURCES = {"/etc", "/root", "/var/run", "/run"}
+
+# AG107 : préfixes qui désignent un paquet hors registre officiel.
+_UNTRUSTED_SOURCE_PREFIXES = (
+    "git+",
+    "git://",
+    "github:",
+    "gitlab:",
+    "bitbucket:",
+    "http://",
+    "https://",
+)
+
+# AG108 : clés qui autorisent des outils sans confirmation, selon le client IA.
+_AUTO_APPROVE_KEYS = ("alwaysAllow", "autoApprove")
 
 
 def _normalize_path(arg: str) -> str:
@@ -146,6 +198,90 @@ def _package_is_pinned(runner: str, package: str) -> bool:
     return bool(version) and version not in {"latest", "next", "*"}
 
 
+def _option_values(args: list[str], flags: set[str]) -> list[str]:
+    """Valeurs d'une option, sous les formes « --flag valeur » et « --flag=valeur »."""
+    values: list[str] = []
+    for index, arg in enumerate(args):
+        flag, sep, value = arg.partition("=")
+        if flag not in flags:
+            continue
+        if sep:
+            values.append(value)
+        elif index + 1 < len(args):
+            values.append(args[index + 1])
+    return values
+
+
+def _mount_source(spec: str) -> str:
+    """Partie « source » d'un montage : '/:/host:ro' -> '/' ; 'C:\\data:/d' -> 'C:\\data'.
+
+    Gère aussi la syntaxe --mount : 'type=bind,source=/,target=/host' -> '/'.
+    """
+    if "=" in spec and "," in spec or spec.startswith(("source=", "src=", "type=")):
+        for part in spec.split(","):
+            key, _, value = part.partition("=")
+            if key.strip() in {"source", "src"}:
+                return value.strip()
+        return ""
+    # Lettre de lecteur Windows (« C: ») : le premier « : » n'est pas un séparateur.
+    if len(spec) >= 2 and spec[1] == ":" and spec[0].isalpha():
+        return spec[:2] + spec[2:].split(":", 1)[0]
+    return spec.split(":", 1)[0]
+
+
+def _is_sensitive_mount(source: str) -> bool:
+    normalized = _normalize_path(source)
+    if normalized in _BROAD_PATHS:
+        return True
+    lowered = normalized.lower()
+    if "docker.sock" in lowered or "docker_engine" in lowered:
+        return True
+    return any(
+        normalized == root or normalized.startswith(root + "/") for root in _SENSITIVE_MOUNT_SOURCES
+    )
+
+
+def _container_issues(args: list[str]) -> list[str]:
+    """Liste lisible des options dangereuses d'un « docker run » / « podman run »."""
+    if "run" not in args:
+        return []
+    issues: list[str] = []
+    if "--privileged" in args or "--privileged=true" in args:
+        issues.append("--privileged")
+    for flag_value in _option_values(args, _HOST_NAMESPACE_FLAGS):
+        if flag_value == "host":
+            issues.append("a host namespace (=host)")
+            break
+    for spec in _option_values(args, _MOUNT_FLAGS | {"--mount"}):
+        source = _mount_source(spec)
+        if source and _is_sensitive_mount(source):
+            issues.append(f"a mount of '{source}'")
+    for capability in _option_values(args, {"--cap-add"}):
+        if capability.upper().removeprefix("CAP_") in _DANGEROUS_CAPABILITIES:
+            issues.append(f"--cap-add {capability}")
+    for option in _option_values(args, {"--security-opt"}):
+        if option.endswith("=unconfined") or option.endswith(":unconfined"):
+            issues.append(f"--security-opt {option}")
+    return issues
+
+
+def _untrusted_source(args: list[str]) -> str | None:
+    """Renvoie la source du paquet si elle est hors registre officiel (git, URL…).
+
+    On ne regarde que le paquet lui-même (1er argument qui n'est pas une option, ou
+    valeur de --from / --package / -p), pas les arguments transmis au serveur : un
+    serveur « fetch » peut légitimement recevoir une URL.
+    """
+    candidates = _option_values(args, {"--from", "--package", "-p"})
+    first = next((a for a in args if not a.startswith("-")), None)
+    if first:
+        candidates.append(first)
+    for value in candidates:
+        if value.lower().startswith(_UNTRUSTED_SOURCE_PREFIXES):
+            return value
+    return None
+
+
 def _check_server(name: str, server: dict, text: str, path: str) -> list[Finding]:
     findings: list[Finding] = []
     line = _line_of(text, f'"{name}"')
@@ -163,11 +299,28 @@ def _check_server(name: str, server: dict, text: str, path: str) -> list[Finding
         if exe in _SHELLS and any(a.lower() in _SHELL_EXEC_FLAGS for a in args):
             add(SHELL_EXECUTION, f"Server '{name}' executes commands through '{exe}'.")
 
-        # AG102 : paquet non figé
         if exe in _PACKAGE_RUNNERS:
-            package = next((a for a in args if not a.startswith("-")), None)
-            if package and not _package_is_pinned(exe, package):
-                add(UNPINNED_PACKAGE, f"Server '{name}' runs '{package}' without a pinned version.")
+            # AG107 : paquet hors registre (git, URL…). Plus grave qu'AG102, qu'on ne
+            # signale pas en plus pour éviter deux alertes sur la même ligne.
+            source = _untrusted_source(args)
+            if source:
+                add(
+                    UNTRUSTED_PACKAGE_SOURCE,
+                    f"Server '{name}' installs its code from '{source}' instead of a registry.",
+                )
+            else:
+                # AG102 : paquet non figé
+                package = next((a for a in args if not a.startswith("-")), None)
+                if package and not _package_is_pinned(exe, package):
+                    add(
+                        UNPINNED_PACKAGE,
+                        f"Server '{name}' runs '{package}' without a pinned version.",
+                    )
+
+        # AG106 : conteneur qui casse son isolation
+        if exe in _CONTAINER_ENGINES:
+            for issue in _container_issues(args):
+                add(DANGEROUS_CONTAINER, f"Server '{name}' runs a container with {issue}.")
 
         # AG104 : accès disque trop large (serveur "filesystem")
         if any("filesystem" in a.lower() for a in args):
@@ -200,6 +353,19 @@ def _check_server(name: str, server: dict, text: str, path: str) -> list[Finding
         parsed = urlparse(url)
         if parsed.scheme == "http" and (parsed.hostname or "") not in _LOCAL_HOSTS:
             add(INSECURE_TRANSPORT, f"Server '{name}' connects to {parsed.hostname} over HTTP.")
+
+    # AG108 : outils exécutés sans confirmation de l'utilisateur
+    for key in _AUTO_APPROVE_KEYS:
+        tools = server.get(key)
+        if isinstance(tools, list) and tools:
+            listed = ", ".join(str(t) for t in tools[:3]) + ("…" if len(tools) > 3 else "")
+            add(
+                AUTO_APPROVED_TOOLS,
+                f"Server '{name}' lets the agent run {len(tools)} tool(s) "
+                f"without asking ({key}: {listed}).",
+            )
+    if server.get("trust") is True:
+        add(AUTO_APPROVED_TOOLS, f"Server '{name}' is fully trusted (trust: true).")
 
     return findings
 

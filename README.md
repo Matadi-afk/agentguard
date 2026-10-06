@@ -39,6 +39,9 @@ agentguard scan .
 | AG103 | high | Secret written literally in an MCP server's `env` or `headers` |
 | AG104 | high | Filesystem server exposed to `/`, `~` or `C:\` |
 | AG105 | high | Remote MCP server reached over plain `http://` |
+| AG106 | high | Docker/Podman server with `--privileged`, host namespaces, `/` or Docker socket mounts |
+| AG107 | high | Package installed from git or a URL instead of the npm / PyPI registry |
+| AG108 | medium | Tools auto-approved (`alwaysAllow`, `autoApprove`, `trust: true`): no human confirmation |
 
 Run `agentguard rules` to list them from the CLI.
 

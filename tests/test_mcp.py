@@ -99,6 +99,100 @@ def test_https_and_localhost_are_fine(write_mcp, url) -> None:
     assert rule_ids(write_mcp({"r": {"url": url}})) == []
 
 
+# --- AG106 : conteneur qui casse son isolation ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "dangerous",
+    [
+        ["--privileged"],
+        ["--network", "host"],
+        ["--net=host"],
+        ["--pid=host"],
+        ["-v", "/:/host"],
+        ["-v", "/var/run/docker.sock:/var/run/docker.sock"],
+        ["--volume=${HOME}:/home"],
+        ["-v", "C:\\:/c"],
+        ["--mount", "type=bind,source=/,target=/host"],
+        ["--cap-add", "SYS_ADMIN"],
+        ["--security-opt", "seccomp=unconfined"],
+    ],
+    ids=lambda flags: " ".join(flags),
+)
+def test_dangerous_container_is_flagged(write_mcp, dangerous) -> None:
+    args = ["run", "-i", "--rm", *dangerous, "mcp/server:1.0"]
+    assert rule_ids(write_mcp({"c": {"command": "docker", "args": args}})) == ["AG106"]
+
+
+def test_each_dangerous_option_is_reported(write_mcp) -> None:
+    args = ["run", "--privileged", "-v", "/:/host", "mcp/server:1.0"]
+    assert rule_ids(write_mcp({"c": {"command": "podman", "args": args}})) == ["AG106", "AG106"]
+
+
+@pytest.mark.parametrize(
+    "safe",
+    [
+        ["-v", "./data:/data:ro"],
+        ["-v", "C:\\projets\\data:/data"],
+        ["--network", "bridge"],
+        ["--cap-add", "NET_BIND_SERVICE"],
+        ["-e", "GITHUB_TOKEN"],
+    ],
+    ids=lambda flags: " ".join(flags),
+)
+def test_safe_container_is_fine(write_mcp, safe) -> None:
+    args = ["run", "-i", "--rm", *safe, "mcp/server:1.0"]
+    assert rule_ids(write_mcp({"c": {"command": "docker", "args": args}})) == []
+
+
+def test_docker_without_run_is_ignored(write_mcp) -> None:
+    args = ["exec", "--privileged", "my-container", "server"]
+    assert rule_ids(write_mcp({"c": {"command": "docker", "args": args}})) == []
+
+
+# --- AG107 : paquet de source non vérifiée --------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        ("npx", ["-y", "github:someone/mcp-server"]),
+        ("npx", ["-y", "git+https://github.com/someone/mcp-server.git"]),
+        ("npx", ["-y", "https://example.com/mcp-server-1.0.0.tgz"]),
+        ("uvx", ["--from", "git+https://github.com/someone/mcp-server", "mcp-server"]),
+        ("uvx", ["--from=git+https://github.com/someone/mcp-server", "mcp-server"]),
+    ],
+)
+def test_untrusted_package_source_is_flagged(write_mcp, command, args) -> None:
+    # AG107 remplace AG102 : une seule alerte pour un seul problème.
+    assert rule_ids(write_mcp({"s": {"command": command, "args": args}})) == ["AG107"]
+
+
+def test_url_given_to_the_server_is_not_a_package_source(write_mcp) -> None:
+    args = ["-y", "@modelcontextprotocol/server-fetch@1.0.0", "https://example.com"]
+    assert rule_ids(write_mcp({"s": {"command": "npx", "args": args}})) == []
+
+
+# --- AG108 : outils approuvés automatiquement -----------------------------------
+
+
+@pytest.mark.parametrize("key", ["alwaysAllow", "autoApprove"])
+def test_auto_approved_tools_are_flagged(write_mcp, key) -> None:
+    path = write_mcp({"s": {"command": "srv", key: ["write_file", "run_command"]}})
+    findings = scan(path).findings
+    assert [f.rule.id for f in findings] == ["AG108"]
+    assert "2 tool(s)" in findings[0].message
+
+
+def test_trusted_server_is_flagged(write_mcp) -> None:
+    assert rule_ids(write_mcp({"s": {"command": "srv", "trust": True}})) == ["AG108"]
+
+
+@pytest.mark.parametrize("server", [{"alwaysAllow": []}, {"trust": False}, {}])
+def test_confirmation_kept_is_fine(write_mcp, server) -> None:
+    assert rule_ids(write_mcp({"s": {"command": "srv", **server}})) == []
+
+
 # --- Formats et fichiers --------------------------------------------------------
 
 
@@ -131,7 +225,8 @@ def test_mcp_file_detection(name, expected) -> None:
 
 def test_vulnerable_example_triggers_every_mcp_rule() -> None:
     ids = set(rule_ids(EXAMPLES / "vulnerable-mcp"))
-    assert {"AG101", "AG102", "AG103", "AG104", "AG105"} <= ids
+    expected = {"AG101", "AG102", "AG103", "AG104", "AG105", "AG106", "AG107", "AG108"}
+    assert expected <= ids
 
 
 def test_safe_example_is_clean() -> None:
