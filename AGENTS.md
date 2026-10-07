@@ -18,15 +18,15 @@ Toute idée qui ne sert pas cette phrase va dans `IDEES.md`, pas dans le code.
 src/agentguard/
   cli.py            Commandes `scan` et `rules`, codes de sortie 0/1/2
   scanner.py        Parcours des fichiers (sans suivre les symlinks, ignore binaires et fichiers > 1 Mo) + appel des règles
-  models.py         Severity (LOW < MEDIUM < HIGH < CRITICAL), Rule, Finding
-  redact.py         redact() : masque un secret (« ghp_****…(40 chars) »)
+  models.py         Severity (LOW < MEDIUM < HIGH < CRITICAL), Rule, Finding (chemin et message assainis à la création)
+  redact.py         redact() masque un secret ; redact_url() masque « user:token@ » ; sanitize() neutralise les caractères de contrôle
   config.py         Secret + get_secret() : lecture sécurisée des variables d'environnement (étape 8)
   rules/
     __init__.py     ALL_RULES = liste de toutes les règles
     secrets.py      AG001 : secrets en clair (regex par fournisseur)
     mcp.py          AG100-AG108 : configurations MCP dangereuses
   reporters/        text.py, json_reporter.py, sarif.py (+ RENDERERS dans __init__)
-tests/              pytest ; conftest.py fournit fake_secret() et la fixture write_mcp
+tests/              pytest ; conftest.py fournit fake_secret() et write_mcp ; test_hardening.py rejoue les attaques connues
 examples/           vulnerable-mcp/ (doit déclencher AG101-AG108) et safe-mcp/ (doit rester propre)
 docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macOS)
 ```
@@ -80,6 +80,18 @@ agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 - Le scanner lit, il n'exécute jamais rien de ce qu'il analyse.
 - Ne pas désactiver un contrôle (`--no-verify`, `# noqa` non justifié) pour faire passer un commit.
 
+## Checklist sécurité (obligatoire pour TOUTE modification)
+
+Fil rouge du projet : agentguard est un outil de sécurité, il doit être lui-même irréprochable. Avant de proposer un changement, vérifier chaque point :
+
+1. **Entrées non fiables** : tout ce qui vient d'un fichier analysé (JSON, texte, noms de fichiers) peut être piégé. Vérifier les types (`isinstance`), ne jamais supposer une structure, et ne jamais laisser une exception arrêter le scan (penser aux fichiers énormes, très imbriqués ou malformés).
+2. **Sorties assainies** : les textes affichés passent par `Finding`, qui applique `sanitize()`. Ne jamais afficher une donnée lue sans passer par là.
+3. **Secrets masqués** : valeur sensible → `redact()` ; URL pouvant contenir des identifiants → `redact_url()`.
+4. **Aucune nouvelle dépendance** à l'exécution, et pas d'action CI non figée par empreinte SHA.
+5. **Un test « malveillant »** pour chaque nouvelle règle ou entrée : il doit échouer sans la protection et passer avec (« test du test »).
+6. **Pas de caractère invisible** dans le code : un caractère spécial s'écrit avec `chr(0x…)`. Le test `test_no_invisible_or_bidi_characters_in_source` le vérifie.
+7. **Exposition** : rien de personnel ni de privé dans les fichiers publics (chemins locaux, noms de projets privés, inventaire de clés).
+
 ## Conventions
 
 - Code, messages du CLI et README **en anglais** (public international). Commentaires, docstrings et documentation `docs/` **en français**.
@@ -92,5 +104,5 @@ agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 
 ## État du projet
 
-- Version 0.2.0 (10 règles). 98 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
+- Version 0.2.1 (10 règles, correctifs de sécurité). 132 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
 - Cap fixé jusqu'au 4 novembre 2026 : publier sur GitHub, ajouter 3 règles, faire un premier post. Voir `IDEES.md` pour ce qui est volontairement mis de côté.

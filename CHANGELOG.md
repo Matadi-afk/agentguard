@@ -3,6 +3,17 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-10-07
+
+### Security
+Three issues found during an internal security review of agentguard itself. They could only be triggered by a scanned file crafted by an attacker. No user report, no known exploitation.
+- **Credentials leaked in reports**: AG107 and AG102 copied package URLs verbatim, so `git+https://user:token@host/…` printed the token in clear in text, JSON and SARIF output. Credentials embedded in URLs are now masked (`https://****@host/…`).
+- **Output injection**: server names and file paths were printed as-is. Newlines could forge GitHub Actions workflow commands (lines starting with `::`) and ANSI or bidirectional control characters could hide or rewrite terminal output. All control, line-separator and bidi characters in findings are now escaped (`\n`, `\x1b`, `\u202e`…), whatever the output format.
+- **Denial of service**: a deeply nested JSON file (`[[[[…]]]]`) crashed the whole scan with a `RecursionError`. It is now reported as AG100 (unreadable configuration) and the rest of the project is still scanned.
+
+### Added
+- `tests/test_hardening.py`: regression tests that replay each attack, plus a permanent check that no invisible or bidirectional characters exist in the project's own source code.
+
 ## [0.2.0] - 2026-10-06
 
 ### Added

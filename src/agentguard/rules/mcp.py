@@ -18,7 +18,7 @@ from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
 from agentguard.models import Finding, Rule, Severity
-from agentguard.redact import redact
+from agentguard.redact import redact, redact_url
 
 # --- Définition des règles -----------------------------------------------------
 
@@ -306,7 +306,8 @@ def _check_server(name: str, server: dict, text: str, path: str) -> list[Finding
             if source:
                 add(
                     UNTRUSTED_PACKAGE_SOURCE,
-                    f"Server '{name}' installs its code from '{source}' instead of a registry.",
+                    f"Server '{name}' installs its code from '{redact_url(source)}' "
+                    "instead of a registry.",
                 )
             else:
                 # AG102 : paquet non figé
@@ -314,7 +315,7 @@ def _check_server(name: str, server: dict, text: str, path: str) -> list[Finding
                 if package and not _package_is_pinned(exe, package):
                     add(
                         UNPINNED_PACKAGE,
-                        f"Server '{name}' runs '{package}' without a pinned version.",
+                        f"Server '{name}' runs '{redact_url(package)}' without a pinned version.",
                     )
 
         # AG106 : conteneur qui casse son isolation
@@ -381,6 +382,18 @@ def check_text(text: str, path: str) -> list[Finding]:
                 path=path,
                 line=error.lineno,
                 message=f"Invalid JSON: {error.msg}.",
+            )
+        ]
+    except (RecursionError, ValueError):
+        # Sécurité : un JSON imbriqué à l'extrême (« [[[[…]]]] ») épuise la pile
+        # de Python. Sans ce garde-fou, un seul fichier piégé ferait planter
+        # tout le scan (déni de service en CI). On le signale comme illisible.
+        return [
+            Finding(
+                rule=INVALID_CONFIG,
+                path=path,
+                line=1,
+                message="Invalid JSON: nesting too deep or unreadable content.",
             )
         ]
 

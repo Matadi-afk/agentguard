@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import Enum
 
+from agentguard.redact import sanitize
+
 
 class Severity(str, Enum):
     """Niveau de gravité d'un constat, du plus faible au plus grave."""
@@ -41,6 +43,14 @@ class Finding:
     path: str  # chemin relatif, avec des "/" (format portable)
     line: int  # numéro de ligne, commence à 1
     message: str  # ne doit JAMAIS contenir un secret en clair
+
+    def __post_init__(self) -> None:
+        # Sécurité par défaut : le chemin et le message contiennent souvent du
+        # texte venant d'un fichier analysé (donc non fiable). On les assainit
+        # ICI, une fois pour toutes, pour qu'aucune règle ni aucun format de
+        # sortie ne puisse l'oublier. (`frozen=True` impose object.__setattr__.)
+        object.__setattr__(self, "path", sanitize(self.path))
+        object.__setattr__(self, "message", sanitize(self.message))
 
     @property
     def severity(self) -> Severity:
