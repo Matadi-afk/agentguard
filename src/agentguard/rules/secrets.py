@@ -41,7 +41,9 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 def check_text(text: str, path: str) -> list[Finding]:
     """Cherche des secrets ligne par ligne dans le contenu d'un fichier."""
     findings: list[Finding] = []
-    for line_number, line in enumerate(text.splitlines(), start=1):
+    # split("\n") et non splitlines() : ce dernier coupe aussi sur \x0c, \x1c, \u2028…
+    # et les numéros de ligne ne correspondraient plus à ceux de l'éditeur ni de GitHub.
+    for line_number, line in enumerate(text.split("\n"), start=1):
         for label, pattern in _PATTERNS:
             for match in pattern.finditer(line):
                 findings.append(

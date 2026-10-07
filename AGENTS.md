@@ -16,10 +16,10 @@ Toute idée qui ne sert pas cette phrase va dans `IDEES.md`, pas dans le code.
 
 ```
 src/agentguard/
-  cli.py            Commandes `scan` et `rules`, codes de sortie 0/1/2
-  scanner.py        Parcours des fichiers (sans suivre les symlinks, ignore binaires et fichiers > 1 Mo) + appel des règles
+  cli.py            Commandes `scan` et `rules`, codes de sortie 0/1/2 ; --output refuse d'écrire à travers un lien symbolique
+  scanner.py        Parcours des fichiers (sans suivre les symlinks ; fichiers ordinaires seulement ; ignore binaires et > 1 Mo) + appel des règles
   models.py         Severity (LOW < MEDIUM < HIGH < CRITICAL), Rule, Finding (chemin et message assainis à la création)
-  redact.py         redact() masque un secret ; redact_url() masque « user:token@ » ; sanitize() neutralise les caractères de contrôle
+  redact.py         redact() masque un secret ; redact_url() masque identifiants et paramètres d'URL ; url_origin() ne garde que « schéma://hôte/… » ; sanitize() neutralise les caractères de contrôle et invisibles
   config.py         Secret + get_secret() : lecture sécurisée des variables d'environnement (étape 8)
   rules/
     __init__.py     ALL_RULES = liste de toutes les règles
@@ -55,7 +55,7 @@ Elles se lancent depuis la racine du projet, avec l'environnement `.venv` activ�
 ```bash
 pip install -e ".[dev]"                     # installation (une fois)
 pytest                                      # tests
-ruff check . && ruff format .               # qualité + sécurité (règles Bandit "S")
+ruff check . ; ruff format .                # qualité + sécurité (règles Bandit "S")
 pre-commit run --all-files                  # tous les contrôles, dont gitleaks
 agentguard scan examples/vulnerable-mcp     # démo : 10 constats attendus
 agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
@@ -64,7 +64,7 @@ agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 ## Ajouter une règle (procédure)
 
 1. Déclarer un `Rule(id=..., title=..., severity=..., remediation=...)` dans le bon fichier de `rules/`, puis l'ajouter à la liste `RULES` de ce fichier.
-2. Écrire la détection. Elle doit produire des `Finding` dont le `message` n'expose **jamais** une valeur sensible : passer par `redact()`.
+2. Écrire la détection. Elle doit produire des `Finding` dont le `message` n'expose **jamais** une valeur sensible : passer par `redact()` (valeur) ou `url_origin()` (URL).
 3. Ajouter des tests : au moins un cas détecté et un cas propre (faux positif évité).
 4. Si la règle concerne MCP, l'ajouter dans `examples/vulnerable-mcp/mcp.json` et vérifier que `examples/safe-mcp` reste propre.
 5. Mettre à jour le tableau des règles ici **et** dans `README.md`.
@@ -84,13 +84,16 @@ agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 
 Fil rouge du projet : agentguard est un outil de sécurité, il doit être lui-même irréprochable. Avant de proposer un changement, vérifier chaque point :
 
-1. **Entrées non fiables** : tout ce qui vient d'un fichier analysé (JSON, texte, noms de fichiers) peut être piégé. Vérifier les types (`isinstance`), ne jamais supposer une structure, et ne jamais laisser une exception arrêter le scan (penser aux fichiers énormes, très imbriqués ou malformés).
-2. **Sorties assainies** : les textes affichés passent par `Finding`, qui applique `sanitize()`. Ne jamais afficher une donnée lue sans passer par là.
-3. **Secrets masqués** : valeur sensible → `redact()` ; URL pouvant contenir des identifiants → `redact_url()`.
-4. **Aucune nouvelle dépendance** à l'exécution, et pas d'action CI non figée par empreinte SHA.
-5. **Un test « malveillant »** pour chaque nouvelle règle ou entrée : il doit échouer sans la protection et passer avec (« test du test »).
-6. **Pas de caractère invisible** dans le code : un caractère spécial s'écrit avec `chr(0x…)`. Le test `test_no_invisible_or_bidi_characters_in_source` le vérifie.
-7. **Exposition** : rien de personnel ni de privé dans les fichiers publics (chemins locaux, noms de projets privés, inventaire de clés).
+1. **Entrées non fiables** : tout ce qui vient d'un fichier analysé (JSON, texte, noms de fichiers) peut être piégé. Vérifier les types (`isinstance`), ne jamais supposer une structure, et ne jamais laisser une exception arrêter le scan (penser aux fichiers énormes, très imbriqués ou malformés, aux URL invalides, aux fichiers spéciaux).
+2. **Temps de calcul** : jamais de traitement quadratique sur une entrée (une boucle qui relit tout le fichier pour chaque élément, une regex qui peut revenir en arrière). Tester avec une entrée de ~1 Mo construite pour être lente.
+3. **Sorties assainies** : les textes affichés passent par `Finding`, qui applique `sanitize()`. Ne jamais afficher une donnée lue sans passer par là.
+4. **Secrets masqués** : valeur sensible → `redact()` ; URL → `url_origin()` dans un message (un jeton peut se cacher dans les identifiants, le chemin ou les paramètres). Ne jamais recopier un message d'erreur Python qui contient l'entrée.
+5. **Écritures sûres** : ne jamais écrire à travers un lien symbolique (le dossier analysé n'est pas fiable).
+6. **Aucune nouvelle dépendance** à l'exécution, et pas d'action CI non figée par empreinte SHA.
+7. **Un test « malveillant »** pour chaque nouvelle règle ou entrée : il doit échouer sans la protection et passer avec (« test du test »).
+8. **Pas de caractère invisible** dans le code : un caractère spécial s'écrit avec `chr(0x…)`. Le test `test_no_invisible_or_bidi_characters_in_source` le vérifie.
+9. **Exposition** : rien de personnel ni de privé dans les fichiers publics (vrai nom, chemins locaux, noms de projets privés, inventaire de clés).
+10. **Contre-vérification** : pour un changement de sécurité, faire relire le correctif par une revue indépendante qui tente de le contourner. Un correctif peut introduire une nouvelle faille (vécu en 0.2.2).
 
 ## Conventions
 
@@ -104,5 +107,5 @@ Fil rouge du projet : agentguard est un outil de sécurité, il doit être lui-m
 
 ## État du projet
 
-- Version 0.2.1 (10 règles, correctifs de sécurité). 132 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
+- Version 0.2.2 (10 règles, deux séries de correctifs de sécurité). 198 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
 - Cap fixé jusqu'au 4 novembre 2026 : publier sur GitHub, ajouter 3 règles, faire un premier post. Voir `IDEES.md` pour ce qui est volontairement mis de côté.

@@ -3,12 +3,12 @@
 # Si un contrôle échoue (ex. un secret détecté), le commit est BLOQUÉ.
 # Installation (une seule fois) : pre-commit install
 # Lancer à la main sur tout le projet : pre-commit run --all-files
-# Versions figées volontairement : on les met à jour avec `pre-commit autoupdate`.
+# Versions figées volontairement : on les met à jour avec `pre-commit autoupdate --freeze`.
 # =============================================================================
 repos:
-  # 🔐 Détection de secrets (clés API, tokens, mots de passe)
+  # Détection de secrets (clés API, tokens, mots de passe)
   - repo: https://github.com/gitleaks/gitleaks
-    rev:  83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
     hooks:
       - id: gitleaks
 

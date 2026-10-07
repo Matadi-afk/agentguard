@@ -8,6 +8,7 @@ que concurrent : ses résultats s'affichent dans leurs tableaux de bord.
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
 from agentguard import __version__
 from agentguard.models import Severity
@@ -53,7 +54,8 @@ def render_sarif(result: ScanResult, **_: object) -> str:
             "locations": [
                 {
                     "physicalLocation": {
-                        "artifactLocation": {"uri": f.path},
+                        # Une URI SARIF doit être encodée (espace -> %20, # -> %23…).
+                        "artifactLocation": {"uri": quote(f.path, safe="/")},
                         "region": {"startLine": f.line},
                     }
                 }

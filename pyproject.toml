@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentguard"
-version = "0.2.1"
+version = "0.2.2"
 description = "Security scanner for AI agent configurations (MCP servers, secrets, supply chain)."
 readme = "README.md"
 license = "Apache-2.0"

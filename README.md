@@ -17,7 +17,7 @@ AI agents (Claude, Cursor, VS Code Copilot…) are increasingly wired to tools t
 Requires Python 3.10+. The package is not on PyPI yet: install a tagged release from GitHub.
 
 ```bash
-pip install "git+https://github.com/Matadi-afk/agentguard@v0.2.0"
+pip install "git+https://github.com/Matadi-afk/agentguard@v0.2.2"
 agentguard scan .
 ```
 
@@ -85,7 +85,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install "git+https://github.com/Matadi-afk/agentguard@v0.2.0"
+      - run: pip install "git+https://github.com/Matadi-afk/agentguard@v0.2.2"
       - run: agentguard scan . --format sarif --output agentguard.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always()

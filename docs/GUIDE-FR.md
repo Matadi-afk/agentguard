@@ -33,7 +33,7 @@ git --version
 Chaque commit publié contient un nom et un e-mail, visibles par tous. Utilise **l'adresse masquée fournie par GitHub** : GitHub → *Settings → Emails* → coche **« Keep my email addresses private »** et copie l'adresse `…@users.noreply.github.com`. Coche aussi **« Block command line pushes that expose my email »**.
 
 ```bash
-git config --global user.name "Dahan"
+git config --global user.name "Matadi-afk"        # ton pseudo GitHub, pas ton vrai nom
 git config --global user.email "12345678+Matadi-afk@users.noreply.github.com"   # 12345678 = ton numéro (Settings → Emails)
 git config --global init.defaultBranch main
 ```
@@ -41,7 +41,8 @@ git config --global init.defaultBranch main
 
 ## Étape 3 : Ouvrir le projet dans VS Code
 
-1. Décompresse `agentguard.zip` dans un dossier de travail (par exemple `Documents/projets/`).
+1. Récupère le projet dans un dossier de travail (par exemple `Documents/projets/`) :
+   `git clone https://github.com/Matadi-afk/agentguard`
 2. VS Code → *Fichier → Ouvrir le dossier…* → choisis `agentguard`.
 3. Si VS Code demande **« Faire confiance aux auteurs ? »**, réponds *Oui* uniquement parce que tu connais la provenance du dossier. Garde ce réflexe pour tout projet téléchargé.
 4. Une notification propose les **extensions recommandées** : clique *Installer*.
@@ -78,7 +79,7 @@ pytest
 agentguard scan examples/vulnerable-mcp
 agentguard scan examples/safe-mcp
 ```
-✅ **Vérification :** `97 passed` ; 10 problèmes sur l'exemple vulnérable ; `No issues found.` sur l'exemple sécurisé.
+✅ **Vérification :** une ligne `… passed` sans aucun `failed` (198 tests en version 0.2.2) ; 10 problèmes sur l'exemple vulnérable ; `No issues found.` sur l'exemple sécurisé.
 
 **Astuce VS Code :** l'onglet *Testing* (icône en forme de fiole) liste et lance les tests. Avec `F5`, tu lances l'outil en mode débogage et tu peux poser des points d'arrêt.
 
@@ -92,6 +93,15 @@ pre-commit run --all-files
 Le premier lancement télécharge les outils (dont gitleaks), ce qui prend 1 à 3 minutes.
 
 ✅ **Vérification :** toutes les lignes affichent `Passed`. Si l'installation de gitleaks échoue, installe Go (go.dev/dl) puis relance.
+
+> **Mettre à jour les outils de contrôle** (une fois par mois) : sous Windows, active d'abord
+> l'UTF-8, sinon l'erreur `'charmap' codec can't decode` apparaît :
+> ```powershell
+> $env:PYTHONUTF8 = "1"
+> pre-commit autoupdate --freeze
+> ```
+> `--freeze` fige chaque outil par son empreinte (immuable) plutôt que par un nom de version
+> modifiable. Vérifie ensuite que la version notée en commentaire n'a pas reculé.
 
 ## Étape 7 : Tester le filet de sécurité (important)
 
@@ -137,8 +147,8 @@ git commit -m "Initial commit: agentguard scanner MVP"
 
 Dans le dépôt, onglet **Settings** :
 
-- **Advanced Security** : active *Secret scanning* + **Push protection**, *Dependabot alerts*, *Dependabot security updates* et *Private vulnerability reporting*.
-- **Rules → Rulesets → New branch ruleset** sur `main` : *Restrict deletions*, *Block force pushes*, *Require status checks to pass* (choisis les jobs CI).
+- **Advanced Security** : active *Secret scanning* + **Push protection**, *Dependabot alerts*, *Dependabot security updates*, *Private vulnerability reporting* et *Code scanning → CodeQL (Default setup)*.
+- **Rules → Rulesets → New branch ruleset** sur `main` (cible : *Include default branch*) : *Restrict deletions* et *Block force pushes*. N'active *Require status checks to pass* que le jour où tu passes par des pull requests : tant que tu pousses directement sur `main`, cette option bloquerait tes push.
 - **Actions → General → Workflow permissions** : *Read repository contents permission*.
 
 ✅ **Vérification :** l'onglet **Actions** montre la CI en vert. L'onglet **Security → Code scanning** affiche les résultats d'agentguard (vides, c'est bon signe).

@@ -18,7 +18,7 @@ from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
 from agentguard.models import Finding, Rule, Severity
-from agentguard.redact import redact, redact_url
+from agentguard.redact import redact, redact_url, url_origin
 
 # --- Définition des règles -----------------------------------------------------
 
@@ -122,7 +122,59 @@ MCP_CONFIG_NAMES = {
 _SHELLS = {"sh", "bash", "zsh", "dash", "cmd", "powershell", "pwsh"}
 _SHELL_EXEC_FLAGS = {"-c", "/c", "/k", "-command", "-encodedcommand", "-enc"}
 _PACKAGE_RUNNERS = {"npx", "pnpx", "bunx", "uvx"}
-_SENSITIVE_KEY = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT|AUTH|CREDENTIAL)", re.I)
+# Options dont la valeur désigne le paquet lancé (« -p » est --package pour npx,
+# mais --python pour uvx).
+_NPM_PACKAGE_FLAGS = {"--package", "-p"}
+_UV_PACKAGE_FLAGS = {"--from"}
+# uvx : paquets installés EN PLUS du serveur (leur code s'exécute aussi).
+_EXTRA_PACKAGE_FLAGS = {"--with", "--with-editable"}
+# Options suivies d'une valeur, PAR LANCEUR : « -f » vaut --force (sans valeur)
+# pour npx mais --find-links (avec valeur) pour uvx. Sans ces listes, la valeur
+# d'une option (« --registry https://… ») serait prise pour le paquet, et une
+# option sans valeur (« -f ») ferait sauter le vrai paquet. Une option inconnue
+# est supposée SANS valeur (cas de « -y »).
+_NPM_OPTIONS_WITH_VALUE = {
+    "--package",
+    "-p",
+    "--call",
+    "-c",
+    "--registry",
+    "--cache",
+    "--userconfig",
+    "--prefix",
+    "--loglevel",
+    "--workspace",
+    "-w",
+}
+_UV_OPTIONS_WITH_VALUE = {
+    "--from",
+    "--with",
+    "--with-editable",
+    "--with-requirements",
+    "--python",
+    "-p",
+    "--index",
+    "--index-url",
+    "--extra-index-url",
+    "--default-index",
+    "--find-links",
+    "-f",
+    "--directory",
+    "--project",
+    "--cache-dir",
+    "--config-file",
+    "--constraints",
+    "--overrides",
+    "--exclude-newer",
+    "--index-strategy",
+    "--keyring-provider",
+    "--python-preference",
+}
+# « PAT » (Personal Access Token) seulement comme mot entier : sinon PATH, PATTERN…
+# seraient pris pour des secrets. « PASS » couvre PASSWORD, PASSWD, DB_PASS…
+_SENSITIVE_KEY = re.compile(
+    r"KEY|TOKEN|SECRET|PASS|(?<![A-Z])PAT(?![A-Z])|AUTH|CREDENTIAL", re.IGNORECASE
+)
 _ENV_REFERENCE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z0-9_:.]*\}?$|^\$\{(env|input):.+\}$")
 _BROAD_PATHS = {"/", "~", "$HOME", "${HOME}", "${userHome}", "C:", "%USERPROFILE%"}
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}  # noqa: S104 (liste de comparaison)
@@ -160,12 +212,35 @@ def is_mcp_config(path: PurePosixPath) -> bool:
     return name in MCP_CONFIG_NAMES or name.endswith(".mcp.json")
 
 
-def _line_of(text: str, needle: str) -> int:
-    """Numéro de ligne (approximatif) de la 1re apparition de `needle`."""
-    for number, line in enumerate(text.splitlines(), start=1):
-        if needle in line:
-            return number
-    return 1
+# Une chaîne JSON complète, puis le « : » qui en fait une clé. On parcourt les
+# chaînes ENTIÈRES, sans jamais redémarrer au milieu de l'une d'elles : temps
+# linéaire, même avec des milliers de « \\" » (le fichier a déjà été validé
+# par json.loads, donc chaque guillemet trouvé ici ouvre bien une chaîne).
+_JSON_STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+_KEY_SEPARATOR = re.compile(r"\s*:")
+
+
+def _key_lines(text: str) -> dict[str, int]:
+    """Numéro de ligne (approximatif) de la 1re apparition de chaque clé JSON.
+
+    Calculé en UNE seule lecture du fichier. Sécurité : relire tout le fichier pour
+    chaque serveur coûtait un temps quadratique ; un fichier piégé de quelques
+    centaines de Ko bloquait alors le scan pendant plusieurs minutes.
+    Les noms écrits avec des échappements (« \\u0073 ») sont décodés.
+    """
+    lines: dict[str, int] = {}
+    line, position = 1, 0
+    for match in _JSON_STRING.finditer(text):
+        if not _KEY_SEPARATOR.match(text, match.end()):
+            continue  # une valeur, pas une clé
+        line += text.count("\n", position, match.start())
+        position = match.start()
+        try:
+            key = json.loads(match.group(0))
+        except ValueError:
+            continue
+        lines.setdefault(key, line)
+    return lines
 
 
 def _extract_servers(data: object) -> dict[str, dict]:
@@ -265,15 +340,43 @@ def _container_issues(args: list[str]) -> list[str]:
     return issues
 
 
-def _untrusted_source(args: list[str]) -> str | None:
-    """Renvoie la source du paquet si elle est hors registre officiel (git, URL…).
+def _package_flags(runner: str) -> set[str]:
+    return _UV_PACKAGE_FLAGS if runner == "uvx" else _NPM_PACKAGE_FLAGS
 
-    On ne regarde que le paquet lui-même (1er argument qui n'est pas une option, ou
-    valeur de --from / --package / -p), pas les arguments transmis au serveur : un
-    serveur « fetch » peut légitimement recevoir une URL.
+
+def _options_with_value(runner: str) -> set[str]:
+    return _UV_OPTIONS_WITH_VALUE if runner == "uvx" else _NPM_OPTIONS_WITH_VALUE
+
+
+def _first_positional(runner: str, args: list[str]) -> str | None:
+    """1er argument qui n'est ni une option, ni la valeur d'une option."""
+    with_value = _options_with_value(runner)
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+        elif arg in with_value:
+            skip_next = True
+        elif not arg.startswith("-"):
+            return arg
+    return None
+
+
+def _package_spec(runner: str, args: list[str]) -> str | None:
+    """Le paquet lancé : valeur de --from / --package / -p, sinon 1er argument."""
+    explicit = _option_values(args, _package_flags(runner))
+    return explicit[0] if explicit else _first_positional(runner, args)
+
+
+def _untrusted_source(runner: str, args: list[str]) -> str | None:
+    """Renvoie la source d'un paquet si elle est hors registre officiel (git, URL…).
+
+    On ne regarde que les paquets installés, pas les arguments transmis au serveur :
+    un serveur « fetch » peut légitimement recevoir une URL. Un registre privé
+    (--registry, --index-url) n'est pas un paquet et n'est pas signalé ici.
     """
-    candidates = _option_values(args, {"--from", "--package", "-p"})
-    first = next((a for a in args if not a.startswith("-")), None)
+    candidates = _option_values(args, _package_flags(runner) | _EXTRA_PACKAGE_FLAGS)
+    first = _first_positional(runner, args)
     if first:
         candidates.append(first)
     for value in candidates:
@@ -282,9 +385,21 @@ def _untrusted_source(args: list[str]) -> str | None:
     return None
 
 
-def _check_server(name: str, server: dict, text: str, path: str) -> list[Finding]:
+def _http_host(url: str) -> str | None:
+    """Hôte d'une URL en http:// ('' si illisible), ou None si l'URL n'est pas en http://."""
+    url = url.strip()
+    if not url.lower().startswith("http://"):
+        return None
+    try:
+        return urlparse(url).hostname or ""
+    except ValueError:
+        # Sécurité : URL malformée (peut-être exprès). On la signale quand même, sans
+        # recopier l'URL ni le message d'erreur : ils peuvent contenir un mot de passe.
+        return ""
+
+
+def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding]:
     findings: list[Finding] = []
-    line = _line_of(text, f'"{name}"')
     command = server.get("command")
     raw_args = server.get("args")
     args = [a for a in raw_args if isinstance(a, str)] if isinstance(raw_args, list) else []
@@ -302,16 +417,18 @@ def _check_server(name: str, server: dict, text: str, path: str) -> list[Finding
         if exe in _PACKAGE_RUNNERS:
             # AG107 : paquet hors registre (git, URL…). Plus grave qu'AG102, qu'on ne
             # signale pas en plus pour éviter deux alertes sur la même ligne.
-            source = _untrusted_source(args)
+            source = _untrusted_source(exe, args)
             if source:
+                # Seulement « schéma://hôte/… » : le chemin ou les paramètres d'une URL
+                # peuvent contenir un jeton, même sans « user:token@ ».
                 add(
                     UNTRUSTED_PACKAGE_SOURCE,
-                    f"Server '{name}' installs its code from '{redact_url(source)}' "
+                    f"Server '{name}' installs its code from '{url_origin(source)}' "
                     "instead of a registry.",
                 )
             else:
                 # AG102 : paquet non figé
-                package = next((a for a in args if not a.startswith("-")), None)
+                package = _package_spec(exe, args)
                 if package and not _package_is_pinned(exe, package):
                     add(
                         UNPINNED_PACKAGE,
@@ -351,9 +468,10 @@ def _check_server(name: str, server: dict, text: str, path: str) -> list[Finding
     # AG105 : serveur distant en HTTP non chiffré
     url = server.get("url") or server.get("serverUrl")
     if isinstance(url, str):
-        parsed = urlparse(url)
-        if parsed.scheme == "http" and (parsed.hostname or "") not in _LOCAL_HOSTS:
-            add(INSECURE_TRANSPORT, f"Server '{name}' connects to {parsed.hostname} over HTTP.")
+        host = _http_host(url)
+        if host is not None and host not in _LOCAL_HOSTS:
+            shown = host or "an unreadable address"
+            add(INSECURE_TRANSPORT, f"Server '{name}' connects to {shown} over HTTP.")
 
     # AG108 : outils exécutés sans confirmation de l'utilisateur
     for key in _AUTO_APPROVE_KEYS:
@@ -397,7 +515,21 @@ def check_text(text: str, path: str) -> list[Finding]:
             )
         ]
 
+    key_lines = _key_lines(text)
     findings: list[Finding] = []
     for name, server in _extract_servers(data).items():
-        findings.extend(_check_server(name, server, text, path))
+        line = key_lines.get(name, 1)
+        try:
+            findings.extend(_check_server(name, server, line, path))
+        except Exception:
+            # Défense en profondeur : un contenu imprévu dans UN serveur ne doit ni
+            # faire planter le scan, ni masquer les problèmes des autres serveurs.
+            findings.append(
+                Finding(
+                    rule=INVALID_CONFIG,
+                    path=path,
+                    line=line,
+                    message=f"Server '{name}' could not be analysed (unexpected content).",
+                )
+            )
     return findings

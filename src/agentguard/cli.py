@@ -21,6 +21,7 @@ from pathlib import Path
 
 from agentguard import __version__
 from agentguard.models import Severity
+from agentguard.redact import sanitize
 from agentguard.reporters import RENDERERS
 from agentguard.rules import ALL_RULES
 from agentguard.scanner import scan
@@ -63,6 +64,52 @@ def _use_color(stream) -> bool:
     return stream.isatty() and "NO_COLOR" not in os.environ
 
 
+def _symlink_on_the_way(path: Path, roots: list[Path]) -> bool:
+    """Un des dossiers traversés (sous le dossier courant ou le dossier scanné),
+    ou le fichier lui-même, est-il un lien symbolique ?"""
+    target = Path(os.path.abspath(path))
+    for root in roots:
+        base = Path(os.path.abspath(root))
+        try:
+            relative = target.relative_to(base)
+        except ValueError:
+            continue
+        current = base
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                return True
+    return target.is_symlink()
+
+
+def _write_report(path: Path, report: str, roots: list[Path]) -> None:
+    """Écrit le rapport sans jamais suivre un lien symbolique.
+
+    Sécurité : en CI, le rapport est écrit DANS le dépôt analysé, qui n'est pas
+    fiable. Un lien « agentguard.sarif -> ../../fichier » ferait écraser un autre
+    fichier de la machine, tout comme un dossier « reports -> ../.. ».
+    O_NOFOLLOW (Linux, macOS) protège aussi le dernier élément pendant l'ouverture.
+    """
+    if ".." in path.parts:
+        # « reports/../x » : le système suit d'abord « reports » (peut-être un lien)
+        # avant de remonter. Impossible à vérifier sans ambiguïté : on refuse.
+        raise OSError(f"refusing an output path that contains '..': {path}")
+    if _symlink_on_the_way(path, roots):
+        raise OSError(f"refusing to write the report through a symbolic link: {path}")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o644)
+    with os.fdopen(descriptor, "w", encoding="utf-8", errors="backslashreplace") as handle:
+        handle.write(report + "\n")
+
+
+def _protect_console() -> None:
+    """Un caractère impossible à afficher ne doit jamais faire planter le rapport."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="backslashreplace")
+
+
 def _cmd_rules() -> int:
     for rule in ALL_RULES:
         print(f"{rule.id}  [{rule.severity.value:<8}] {rule.title}")
@@ -73,15 +120,20 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     try:
         result = scan(args.path, excludes=args.exclude)
     except FileNotFoundError as error:
-        print(f"agentguard: error: {error}", file=sys.stderr)
+        print(f"agentguard: error: {sanitize(str(error))}", file=sys.stderr)
         return EXIT_ERROR
 
     to_file = bool(args.output)
     report = RENDERERS[args.format](result, color=not to_file and _use_color(sys.stdout))
 
     if to_file:
-        Path(args.output).write_text(report + "\n", encoding="utf-8")
-        print(f"Report written to {args.output} ({len(result.findings)} finding(s)).")
+        try:
+            _write_report(Path(args.output), report, roots=[Path.cwd(), Path(args.path)])
+        except OSError as error:
+            print(f"agentguard: error: {sanitize(str(error))}", file=sys.stderr)
+            return EXIT_ERROR
+        shown = sanitize(args.output)
+        print(f"Report written to {shown} ({len(result.findings)} finding(s)).")
     else:
         print(report)
 
@@ -91,6 +143,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _protect_console()
     args = _build_parser().parse_args(argv)
     if args.command == "rules":
         return _cmd_rules()

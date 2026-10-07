@@ -36,4 +36,10 @@ def render_text(result: ScanResult, *, color: bool = False) -> str:
     )
     if not result.findings:
         lines.append("No issues found.")
+    if result.files_skipped:
+        # Transparence : « aucun problème » ne vaut que pour ce qui a été lu.
+        lines.append(
+            f"Note: {result.files_skipped} file(s) or folder(s) could not be analysed "
+            "(too large, binary, special or unreadable)."
+        )
     return "\n".join(lines)

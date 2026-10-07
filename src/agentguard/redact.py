@@ -16,18 +16,49 @@ import re
 import unicodedata
 
 _VISIBLE_CHARS = 4
+# En dessous de cette longueur, on ne montre RIEN : afficher 4 caractères d'un
+# mot de passe de 9 caractères en révélerait presque la moitié.
+_MIN_LENGTH_FOR_PREFIX = 16
 
-# « schéma://utilisateur:motdepasse@hôte » -> on masque tout ce qui précède « @ ».
-_URL_USERINFO = re.compile(r"(?<=://)[^/@\s]+@")
+# Une URL dans un texte : « schéma:// » puis tout jusqu'à un espace ou un guillemet.
+# Performance (anti-ReDoS) : le schéma doit commencer en début de mot et fait au
+# plus 32 caractères, sinon un long texte sans « :// » coûterait un temps quadratique.
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]{0,31}://")
+# Raccourcis npm sans « :// » : github:auteur/projet, gitlab:…, bitbucket:…, gist:…
+_SHORTHAND = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]{0,31}:(?!//)")
+_URL = re.compile(
+    r"(?<![A-Za-z0-9+.\-])(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]{0,31}://)(?P<rest>[^\s'\"]*)"
+)
 
-# Caractères Unicode qui inversent l'ordre d'affichage du texte (attaque
-# « Trojan Source ») : invisibles mais capables de tromper la lecture.
-# Construits avec chr() : un formateur de code ne peut pas les transformer en
-# caractères invisibles dans le fichier source lui-même.
-_BIDI_CONTROLS = frozenset(
-    chr(code)
-    for code in (0x061C, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E)
-    + (0x2066, 0x2067, 0x2068, 0x2069)
+# Catégories Unicode dangereuses à l'affichage :
+#   Cc      contrôles (\n, \x1b, DEL…) : nouvelles lignes, codes ANSI ;
+#   Cf      caractères invisibles de mise en forme : contrôles bidirectionnels
+#           (attaque « Trojan Source »), espaces de largeur nulle, « tags »…
+#   Cs      moitiés de paire UTF-16, invalides : la sortie ne pourrait pas être écrite ;
+#   Zl, Zp  séparateurs de ligne et de paragraphe.
+_DANGEROUS_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+# Tous les caractères « ignorables par défaut » d'Unicode (propriété
+# Default_Ignorable_Code_Point) : invisibles à l'écran, mais lisibles par une IA
+# qui lirait le rapport. Une suite de sélecteurs de variante suffit à y cacher
+# un message. La plupart sont déjà de catégorie Cf ; on liste tout par prudence.
+_DEFAULT_IGNORABLE_RANGES = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
 )
 _NAMED_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
 
@@ -37,36 +68,88 @@ def redact(secret: str) -> str:
 
     >>> redact("sk-ant-abcdefghijklmnop")
     'sk-a****…(23 chars)'
+    >>> redact("Winter2026!")
+    '****'
     """
-    if len(secret) <= _VISIBLE_CHARS * 2:
+    if len(secret) < _MIN_LENGTH_FOR_PREFIX:
         return "****"
     return f"{secret[:_VISIBLE_CHARS]}****…({len(secret)} chars)"
 
 
+def _redact_one_url(match: re.Match[str]) -> str:
+    rest = match.group("rest")
+    # La requête (?…) et l'ancre (#…) peuvent porter un jeton : on les masque.
+    for marker in "?#":
+        head, sep, _ = rest.partition(marker)
+        if sep:
+            rest = f"{head}{sep}****"
+            break
+    # Identifiants : tout ce qui précède le DERNIER « @ » de la partie avant « ?# ».
+    # Choix prudent : un mot de passe mal encodé peut contenir « / » ou « @ ».
+    head, at, host_and_path = rest.rpartition("@")
+    if at and head:
+        rest = f"****@{host_and_path}"
+    return match.group("scheme") + rest
+
+
 def redact_url(value: str) -> str:
-    """Masque les identifiants intégrés à une URL.
+    """Masque les identifiants et paramètres sensibles des URL d'un texte.
 
     >>> redact_url("git+https://alice:token123@github.com/x/y.git")
     'git+https://****@github.com/x/y.git'
+    >>> redact_url("https://example.com/pkg.tgz?token=abc")
+    'https://example.com/pkg.tgz?****'
 
-    Une URL sans identifiants, ou un texte qui n'est pas une URL, est renvoyé
-    tel quel. On utilise une expression régulière plutôt qu'un analyseur d'URL :
-    elle ne peut pas lever d'exception sur une entrée malformée.
+    Un texte sans URL est renvoyé tel quel. On utilise une expression régulière
+    plutôt qu'un analyseur d'URL : elle ne peut pas lever d'exception sur une
+    entrée malformée. En cas de doute, on masque trop plutôt que pas assez.
     """
-    return _URL_USERINFO.sub("****@", value)
+    return _URL.sub(_redact_one_url, value)
+
+
+def url_origin(value: str) -> str:
+    """Garde seulement « schéma://hôte/… » d'une URL.
+
+    >>> url_origin("https://jane:p4ss w0rd@npm.example/T0KEN/pkg.tgz?x=1")
+    'https://npm.example/…'
+
+    Le plus sûr pour un message : ni identifiants, ni chemin (certains registres
+    privés y placent un jeton), ni paramètres. Un texte qui n'est pas une URL
+    (« github:auteur/projet ») est renvoyé après redact_url().
+    """
+    value = value.strip()
+    scheme = _SCHEME.match(value)
+    if scheme:
+        # Le DERNIER « @ » de toute la suite : un mot de passe mal encodé peut contenir
+        # « ? », « # » ou « / ». Au pire, on affiche un mauvais hôte, jamais le secret.
+        after_credentials = value[scheme.end() :].rpartition("@")[2]
+        host = re.split(r"[/?#\\\s]", after_credentials, maxsplit=1)[0]
+        return f"{scheme.group(0)}{host}/…"
+    shorthand = _SHORTHAND.match(value)
+    if shorthand:
+        # « github:jane:jeton@auteur/projet » -> « github:auteur/projet »
+        return shorthand.group(0) + value[shorthand.end() :].rpartition("@")[2]
+    return redact_url(value)
 
 
 def _is_dangerous(char: str) -> bool:
-    category = unicodedata.category(char)
-    # Cc = contrôles C0/C1 et DEL ; Zl/Zp = séparateurs de ligne/paragraphe.
-    return category in {"Cc", "Zl", "Zp"} or char in _BIDI_CONTROLS
+    if char.isprintable() and char.isascii():
+        return False  # cas courant, le plus rapide
+    if unicodedata.category(char) in _DANGEROUS_CATEGORIES:
+        return True
+    code = ord(char)
+    return any(low <= code <= high for low, high in _DEFAULT_IGNORABLE_RANGES)
 
 
 def _escape(char: str) -> str:
     if char in _NAMED_ESCAPES:
         return _NAMED_ESCAPES[char]
     code = ord(char)
-    return f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}"
+    if code <= 0xFF:
+        return f"\\x{code:02x}"
+    if code <= 0xFFFF:
+        return f"\\u{code:04x}"
+    return f"\\U{code:08x}"
 
 
 def sanitize(text: str) -> str:
@@ -76,7 +159,8 @@ def sanitize(text: str) -> str:
     'evil\\\\n::error::x'
 
     Les lettres accentuées et les emojis sont conservés : seuls les caractères
-    capables de modifier l'affichage ou de créer une nouvelle ligne sont échappés.
+    capables de modifier l'affichage, de créer une nouvelle ligne, de cacher du
+    texte ou de rendre la sortie impossible à encoder sont échappés.
     """
     if not any(_is_dangerous(c) for c in text):
         return text  # cas courant : aucun coût

@@ -3,15 +3,17 @@
 Précautions de sécurité du parcours :
 - on ne suit PAS les liens symboliques (un lien piégé pourrait faire lire
   des fichiers hors du projet, ou boucler à l'infini) ;
+- on ne lit que les fichiers ordinaires (un « tube » FIFO bloquerait le scan) ;
 - on ignore les fichiers trop gros et les fichiers binaires ;
-- un fichier illisible est sauté sans faire planter tout le scan.
+- un fichier ou un dossier illisible est sauté (et compté) sans faire planter le scan.
 """
 
 from __future__ import annotations
 
 import fnmatch
 import os
-from collections.abc import Iterable, Iterator
+import stat
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -50,13 +52,21 @@ def _is_excluded(relative: PurePosixPath, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatch(text, p) or fnmatch.fnmatch(relative.name, p) for p in patterns)
 
 
-def iter_files(root: Path, excludes: Iterable[str] = ()) -> Iterator[Path]:
-    """Liste les fichiers à analyser, sans suivre les liens symboliques."""
+def iter_files(
+    root: Path,
+    excludes: Iterable[str] = (),
+    on_error: Callable[[OSError], None] | None = None,
+) -> Iterator[Path]:
+    """Liste les fichiers à analyser, sans suivre les liens symboliques.
+
+    `on_error` est appelé pour chaque dossier illisible : sans lui, os.walk les
+    ignorerait en silence et le rapport dirait « No issues found » à tort.
+    """
     excludes = list(excludes)
     if root.is_file():
         yield root
         return
-    for current, dirnames, filenames in os.walk(root, followlinks=False):
+    for current, dirnames, filenames in os.walk(root, onerror=on_error, followlinks=False):
         current_path = Path(current)
         # Modifier `dirnames` sur place empêche os.walk de descendre dans ces dossiers.
         dirnames[:] = sorted(
@@ -80,14 +90,20 @@ def iter_files(root: Path, excludes: Iterable[str] = ()) -> Iterator[Path]:
 def _read_text(path: Path) -> str | None:
     """Lit un fichier texte, ou renvoie None s'il faut l'ignorer."""
     try:
-        if path.stat().st_size > MAX_FILE_SIZE:
+        info = path.stat()
+        # Seulement les fichiers ordinaires : un tube (FIFO) ou un périphérique
+        # bloquerait la lecture indéfiniment.
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_SIZE:
             return None
-        raw = path.read_bytes()
+        with path.open("rb") as handle:
+            raw = handle.read(MAX_FILE_SIZE + 1)  # lecture bornée, même si le fichier grossit
     except OSError:
         return None
-    if b"\0" in raw[:_BINARY_SNIFF_SIZE]:  # octet nul = fichier binaire
+    if len(raw) > MAX_FILE_SIZE or b"\0" in raw[:_BINARY_SNIFF_SIZE]:  # octet nul = binaire
         return None
-    return raw.decode("utf-8", errors="replace")
+    # « utf-8-sig » retire l'éventuel BOM : sinon json.loads refuserait le fichier et
+    # une configuration dangereuse échapperait à l'analyse.
+    return raw.decode("utf-8-sig", errors="replace")
 
 
 def scan(target: str | Path, excludes: Iterable[str] = ()) -> ScanResult:
@@ -98,7 +114,11 @@ def scan(target: str | Path, excludes: Iterable[str] = ()) -> ScanResult:
     base = root.parent if root.is_file() else root
 
     result = ScanResult()
-    for path in iter_files(root, excludes):
+
+    def count_unreadable_directory(_error: OSError) -> None:
+        result.files_skipped += 1
+
+    for path in iter_files(root, excludes, on_error=count_unreadable_directory):
         text = _read_text(path)
         if text is None:
             result.files_skipped += 1
