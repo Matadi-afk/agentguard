@@ -2,19 +2,19 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "agentguard : scanner l'exemple vulnérable",
+      "name": "configwarden : scanner l'exemple vulnérable",
       "type": "debugpy",
       "request": "launch",
-      "module": "agentguard",
+      "module": "configwarden",
       "args": ["scan", "examples/vulnerable-mcp"],
       "console": "integratedTerminal",
       "justMyCode": true
     },
     {
-      "name": "agentguard : scanner tout le projet",
+      "name": "configwarden : scanner tout le projet",
       "type": "debugpy",
       "request": "launch",
-      "module": "agentguard",
+      "module": "configwarden",
       "args": ["scan", ".", "--exclude", "examples/*"],
       "console": "integratedTerminal",
       "justMyCode": true
