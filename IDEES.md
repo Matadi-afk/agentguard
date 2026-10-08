@@ -36,18 +36,10 @@ Le parking à idées. Une idée qui ne sert pas la phrase du projet atterrit ici
   dans les paquets MCP.
 
 ## Angles morts relevés par la revue indépendante (7 octobre 2026)
-- **AG101** : `bash -lc`, `wsl.exe bash -c`, `/usr/bin/env sh -c`, `pwsh -e` non détectés.
-- **Lanceurs Windows** : `npx.cmd` (seul `.exe` est retiré du nom).
-- **AG102** : `@^1.0.0`, `@1` et `@beta` comptés comme figés à tort.
-- **AG107** : `git@github.com:…` et la syntaxe PEP 508 `srv @ git+https://…` non détectés.
-- **AG104 / AG106** : `/Users/nom`, `C:\Users\nom`, `c:\` en minuscule, montage `~/.ssh`.
 - **SARIF** : chemins relatifs au dossier scanné, pas à la racine du dépôt (ajouter `uriBaseId`).
-- **AG103** : `DATABASE_URL` contenant un mot de passe.
-- **AG103 (faux positifs)** : ne pas signaler les modèles `<YOUR_KEY>` ni les références
-  `${VAR:-défaut}`, `%VAR%`, `${{ secrets.NOM }}` (mais vérifier une valeur par défaut écrite
-  en clair).
-- **Commandes enveloppées** : `cmd /c npx …`, `wsl bash -c …`, `env sh -c …` : analyser aussi
-  la commande intérieure (aujourd'hui, AG102 et AG107 ne la voient pas).
+- **PowerShell encodé** : décoder `-EncodedCommand` (base64 UTF-16) pour analyser la commande
+  cachée, au lieu de seulement la signaler.
+- **`env -S "…"`** : découper la chaîne passée à `env -S` comme un script.
 
 ## Recherche des Éclaireurs (8 octobre 2026)
 - **TOML et YAML** (décision du 8 octobre : plus tard) : Codex CLI (`config.toml`,

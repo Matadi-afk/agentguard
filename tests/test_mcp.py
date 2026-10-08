@@ -17,7 +17,13 @@ def rule_ids(path: Path) -> list[str]:
 
 @pytest.mark.parametrize(
     ("command", "args"),
-    [("bash", ["-c", "echo hi"]), ("/bin/sh", ["-c", "x"]), ("C:\\Windows\\cmd.exe", ["/c", "x"])],
+    [
+        ("bash", ["-c", "echo hi"]),
+        ("/bin/sh", ["-c", "x"]),
+        # cmd /c avec un caractère spécial (décision du 8 octobre 2026 : sans caractère
+        # spécial, cmd /c n'est plus signalé et la commande lancée est analysée).
+        ("C:\\Windows\\cmd.exe", ["/c", "x & y"]),
+    ],
 )
 def test_shell_execution_is_flagged(write_mcp, command, args) -> None:
     assert rule_ids(write_mcp({"s": {"command": command, "args": args}})) == ["AG101"]

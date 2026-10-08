@@ -19,6 +19,7 @@ src/agentguard/
   cli.py            Commandes `scan` et `rules`, codes de sortie 0/1/2 ; --output refuse d'écrire à travers un lien symbolique
   scanner.py        Parcours des fichiers (sans suivre les symlinks ; fichiers ordinaires seulement ; ignore binaires et > 1 Mo ; lit l'UTF-16/32 avec BOM) + appel des règles
   models.py         Severity (LOW < MEDIUM < HIGH < CRITICAL), Rule, Finding (chemin et message assainis à la création)
+  commands.py       analyse() : retire les enveloppes (cmd /c, wsl, env, sudo, bash -c…) et relève les risques AG101
   jsonc.py          loads() : JSON strict, sinon JSON avec commentaires et virgules finales (temps linéaire, positions conservées)
   redact.py         redact() masque un secret ; redact_url() masque identifiants et paramètres d'URL ; url_origin() ne garde que « schéma://hôte/… » ; sanitize() neutralise les caractères de contrôle et invisibles
   config.py         Secret + get_secret() : lecture sécurisée des variables d'environnement (étape 8)
@@ -38,13 +39,13 @@ docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macO
 |----|---------|---------|---------|
 | AG001 | critical | rules/secrets.py | Clé API ou token en clair |
 | AG100 | medium | rules/mcp.py | Config MCP illisible (certains outils lancent quand même une partie d'un fichier abîmé) |
-| AG101 | high | rules/mcp.py | Serveur lancé via un shell (`bash -c`, `cmd /c`…) |
-| AG102 | medium | rules/mcp.py | Paquet `npx`/`uvx` sans version figée |
-| AG103 | high | rules/mcp.py | Secret littéral dans `env` ou `headers` |
-| AG104 | high | rules/mcp.py | Serveur filesystem ouvert sur `/`, `~`, `C:\` |
+| AG101 | high | rules/mcp.py | Shell qui reçoit un script (`bash -c`, `pwsh -Command`), `cmd /c` avec une ligne de commande ou des caractères spéciaux, code en ligne (`node -e`, `python -c`) |
+| AG102 | medium | rules/mcp.py | Paquet `npx`/`uvx` sans version **exacte** (`^1.0`, `@beta`, `>=1` ne comptent pas) |
+| AG103 | high | rules/mcp.py | Secret littéral dans `env` ou `headers`, y compris mot de passe dans une URL et valeur par défaut de `${VAR:-…}` (références et modèles `<YOUR_KEY>` ignorés) |
+| AG104 | high | rules/mcp.py | Serveur filesystem ouvert sur `/`, un lecteur entier ou un dossier personnel complet |
 | AG105 | high | rules/mcp.py | Serveur distant en `http://` |
-| AG106 | high | rules/mcp.py | Conteneur Docker/Podman qui casse l'isolation (`--privileged`, `=host`, montage de `/` ou du socket Docker…) |
-| AG107 | high | rules/mcp.py | Paquet installé depuis git ou une URL (remplace AG102 pour ce paquet) |
+| AG106 | high | rules/mcp.py | Conteneur Docker/Podman qui casse l'isolation (`--privileged`, `=host`, montage de `/`, du dossier personnel, de `.ssh`/`.aws`… ou du socket Docker) |
+| AG107 | high | rules/mcp.py | Paquet installé depuis git, une URL, un raccourci GitHub `auteur/projet` ou `nom @ url` (remplace AG102 pour ce paquet) |
 | AG108 | medium | rules/mcp.py | Outils approuvés sans confirmation (`alwaysAllow`, `autoApprove`, `trust: true`) |
 
 Prochain ID libre : **AG002** (secrets) ou **AG110** (MCP). **AG109** est réservé à la règle « l'outil IA approuve tout sans demander » (décidée le 8 octobre 2026).
@@ -127,5 +128,5 @@ Fil rouge du projet : agentguard est un outil de sécurité, il doit être lui-m
 
 ## État du projet
 
-- Version 0.2.2 publiée (10 règles, deux séries de correctifs de sécurité). v0.3.0 en cours : lecture des vrais fichiers de configuration. 252 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
+- Version 0.2.2 publiée (10 règles, deux séries de correctifs de sécurité). v0.3.0 en cours : vrais fichiers de configuration (jour 1), commandes enveloppées et angles morts AG101 à AG107 (jour 2). 357 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
 - Cap fixé jusqu'au 4 novembre 2026 : publier sur GitHub, ajouter 3 règles, faire un premier post. Voir `IDEES.md` pour ce qui est volontairement mis de côté.

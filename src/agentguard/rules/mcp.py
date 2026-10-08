@@ -27,7 +27,7 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
-from agentguard import jsonc
+from agentguard import commands, jsonc
 from agentguard.models import Finding, Rule, Severity
 from agentguard.redact import redact, redact_url, url_origin
 
@@ -168,8 +168,6 @@ _MCP_MARKERS = ('"mcpServers"', '"context_servers"', '"mcp"')
 _UNICODE_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
 # Clés qui désignent l'adresse d'un serveur distant, selon l'outil.
 _URL_KEYS = ("url", "serverUrl", "httpUrl")
-_SHELLS = {"sh", "bash", "zsh", "dash", "cmd", "powershell", "pwsh"}
-_SHELL_EXEC_FLAGS = {"-c", "/c", "/k", "-command", "-encodedcommand", "-enc"}
 _PACKAGE_RUNNERS = {"npx", "pnpx", "bunx", "uvx"}
 # Options dont la valeur désigne le paquet lancé (« -p » est --package pour npx,
 # mais --python pour uvx).
@@ -224,8 +222,40 @@ _UV_OPTIONS_WITH_VALUE = {
 _SENSITIVE_KEY = re.compile(
     r"KEY|TOKEN|SECRET|PASS|(?<![A-Z])PAT(?![A-Z])|AUTH|CREDENTIAL", re.IGNORECASE
 )
-_ENV_REFERENCE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z0-9_:.]*\}?$|^\$\{(env|input):.+\}$")
-_BROAD_PATHS = {"/", "~", "$HOME", "${HOME}", "${userHome}", "C:", "%USERPROFILE%"}
+# AG103 : références à une variable (pas un secret) selon les outils :
+# $VAR, ${VAR}, ${env:VAR}, ${input:id}, %VAR% (Windows), $env:VAR (PowerShell),
+# ${{ secrets.NOM }} (Continue).
+_ENV_REFERENCE = re.compile(
+    r"\$\{?[A-Za-z_][A-Za-z0-9_:.]*\}?"
+    r"|\$\{(?:env|input):.+\}"
+    r"|%[A-Za-z_][A-Za-z0-9_]*%"
+    r"|\$env:[A-Za-z_][A-Za-z0-9_]*"
+    r"|\$\{\{\s*[A-Za-z0-9_.]+\s*\}\}"
+)
+# ${VAR:-défaut} : la valeur par défaut, elle, peut être un vrai secret écrit en clair.
+_DEFAULTED_REFERENCE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=](.*)\}", re.DOTALL)
+# Modèles à remplir des documentations : <YOUR_KEY>, your-api-key-here, xxxx…
+_PLACEHOLDER = re.compile(
+    r"<[^<>]*>|\[[^\[\]]*\]|x{3,}|\*{3,}|\.{3,}|changeme|change-me|replace[-_ ]?me"
+    r"|placeholder|todo|tbd|your[-_ ][a-z0-9_ -]+",
+    re.IGNORECASE,
+)
+# Mot de passe dans une URL (postgres://user:motdepasse@hôte). Quantités bornées et
+# début de mot obligatoire : temps linéaire même sur un texte piégé.
+_URL_PASSWORD = re.compile(
+    r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}://[^/@\s:]{0,256}:([^@\s/]{1,512})@"
+)
+# AG104 / AG106 : dossiers trop larges (racine, lecteur, dossier personnel entier).
+_BROAD_PATH = re.compile(
+    r"/|/root|[a-z]:|(?:/home|/users|[a-z]:/users)(?:/[^/]+)?"
+    r"|~|\$home|\$\{home\}|\$\{userhome\}|%userprofile%|%homepath%"
+    r"|\$\{env:(?:userprofile|home)\}|\$env:(?:userprofile|home)",
+    re.IGNORECASE,
+)
+# Dossiers d'identifiants, où qu'ils soient : .ssh, .aws, .gnupg, .kube, .docker…
+_CREDENTIAL_FOLDER = re.compile(
+    r"(?:^|/)\.(?:ssh|aws|gnupg|kube|docker|azure|config/gcloud)(?:/|$)", re.IGNORECASE
+)
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}  # noqa: S104 (liste de comparaison)
 
 # AG106 : moteurs de conteneurs et options qui cassent l'isolation.
@@ -244,6 +274,21 @@ _UNTRUSTED_SOURCE_PREFIXES = (
     "bitbucket:",
     "http://",
     "https://",
+    "ssh://",
+    "hg+",
+    "svn+",
+    "bzr+",
+)
+# npm : « auteur/projet » (sans @ devant) désigne un dépôt GitHub, pas le registre.
+_GITHUB_SHORTHAND = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+(?:#\S*)?")
+# Adresse git au format « scp » : git@github.com:auteur/projet.git
+_SCP_GIT = re.compile(r"[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):\S+")
+# Python (PEP 508) : « nom @ url » installe depuis cette adresse.
+_PEP508_URL = re.compile(r"\s*[A-Za-z0-9._-]+(?:\[[^\]]*\])?\s*@\s*(\S+)\s*")
+# Version exacte : npm (semver x.y.z) et Python (== ou @ suivi d'un numéro).
+_NPM_EXACT_VERSION = re.compile(r"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
+_UV_EXACT_VERSION = re.compile(
+    r"\s*[A-Za-z0-9._-]+(?:\[[^\]]*\])?\s*(?:===?|@)\s*v?\d[0-9A-Za-z.+!-]*\s*"
 )
 
 # AG108 : clés qui autorisent des outils sans confirmation, selon le client IA.
@@ -387,21 +432,41 @@ def _normalize_server(server: dict) -> dict:
     return merged
 
 
-def _executable_name(command: str) -> str:
-    """'/usr/bin/bash' -> 'bash' ; 'C:\\...\\cmd.exe' -> 'cmd'."""
-    name = re.split(r"[\\/]", command.strip())[-1].lower()
-    return name.removesuffix(".exe")
-
-
 def _package_is_pinned(runner: str, package: str) -> bool:
+    """Version EXACTE ? « ^1.0.0 », « ~1.2 », « 1 », « beta », « >=1 » ne le sont pas."""
     if runner == "uvx":
-        return "==" in package or ("@" in package and not package.endswith("@latest"))
+        return bool(_UV_EXACT_VERSION.fullmatch(package))
     # npm : "@scope/pkg@1.2.3" -> on ignore le "@" initial du scope.
     name_and_version = package[1:] if package.startswith("@") else package
     if "@" not in name_and_version:
         return False
     version = name_and_version.rsplit("@", 1)[1]
-    return bool(version) and version not in {"latest", "next", "*"}
+    return bool(_NPM_EXACT_VERSION.fullmatch(version))
+
+
+def _is_broad_path(value: str) -> bool:
+    """Racine, lecteur entier ou dossier personnel complet (pas un sous-dossier)."""
+    return bool(_BROAD_PATH.fullmatch(_normalize_path(value).replace("\\", "/")))
+
+
+def _literal_secret(value: str) -> str | None:
+    """La partie littérale d'une valeur, ou None si c'est une référence ou un modèle."""
+    candidate = value.strip().removeprefix("Bearer ").strip()
+    for _ in range(20):  # ${A:-${B:-…}} : on descend, mais jamais indéfiniment
+        defaulted = _DEFAULTED_REFERENCE.fullmatch(candidate)
+        if defaulted is None:
+            break
+        candidate = defaulted.group(1).strip()
+        if not candidate:
+            return None
+    if not candidate or _ENV_REFERENCE.fullmatch(candidate) or _PLACEHOLDER.fullmatch(candidate):
+        return None
+    return candidate
+
+
+def _has_url_password(value: str) -> bool:
+    match = _URL_PASSWORD.search(value)
+    return match is not None and _literal_secret(match.group(1)) is not None
 
 
 def _option_values(args: list[str], flags: set[str]) -> list[str]:
@@ -437,7 +502,7 @@ def _mount_source(spec: str) -> str:
 
 def _is_sensitive_mount(source: str) -> bool:
     normalized = _normalize_path(source)
-    if normalized in _BROAD_PATHS:
+    if _is_broad_path(normalized) or _CREDENTIAL_FOLDER.search(normalized.replace("\\", "/")):
         return True
     lowered = normalized.lower()
     if "docker.sock" in lowered or "docker_engine" in lowered:
@@ -511,8 +576,25 @@ def _untrusted_source(runner: str, args: list[str]) -> str | None:
     if first:
         candidates.append(first)
     for value in candidates:
-        if value.lower().startswith(_UNTRUSTED_SOURCE_PREFIXES):
-            return value
+        source = _source_outside_registry(runner, value)
+        if source:
+            return source
+    return None
+
+
+def _source_outside_registry(runner: str, value: str) -> str | None:
+    """L'adresse d'où vient le paquet s'il ne vient pas du registre officiel."""
+    if value.lower().startswith(_UNTRUSTED_SOURCE_PREFIXES):
+        return value
+    pep508 = _PEP508_URL.fullmatch(value)
+    if pep508 and pep508.group(1).lower().startswith(_UNTRUSTED_SOURCE_PREFIXES):
+        return pep508.group(1)
+    scp = _SCP_GIT.fullmatch(value)
+    if scp and scp.group(1).lower() != "npm":  # « alias@npm:paquet » reste le registre
+        return value.split("@", 1)[1]  # sans la partie « utilisateur@ »
+    is_archive = value.lower().endswith((".tgz", ".tar.gz", ".tar"))
+    if runner != "uvx" and _GITHUB_SHORTHAND.fullmatch(value) and not is_archive:
+        return value
     return None
 
 
@@ -539,11 +621,14 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
         findings.append(Finding(rule=rule, path=path, line=line, message=message))
 
     if isinstance(command, str) and command.strip():
-        exe = _executable_name(command)
+        # Les enveloppes (cmd /c, wsl, env, sudo, bash -c…) sont retirées : on vérifie
+        # le programme vraiment lancé, et on relève au passage les risques AG101.
+        launch = commands.analyse(command, args)
+        exe, args = launch.executable, launch.args
 
-        # AG101 : exécution via un shell
-        if exe in _SHELLS and any(a.lower() in _SHELL_EXEC_FLAGS for a in args):
-            add(SHELL_EXECUTION, f"Server '{name}' executes commands through '{exe}'.")
+        # AG101 : shell, ligne de commande ou code en ligne (une seule alerte par serveur)
+        if launch.risks:
+            add(SHELL_EXECUTION, f"Server '{name}' {launch.risks[0]}.")
 
         if exe in _PACKAGE_RUNNERS:
             # AG107 : paquet hors registre (git, URL…). Plus grave qu'AG102, qu'on ne
@@ -574,7 +659,7 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
         # AG104 : accès disque trop large (serveur "filesystem")
         if any("filesystem" in a.lower() for a in args):
             for arg in args:
-                if _normalize_path(arg) in _BROAD_PATHS:
+                if _is_broad_path(arg):
                     add(BROAD_FILESYSTEM, f"Server '{name}' exposes '{arg}' to the AI agent.")
 
     # AG103 : secrets en dur dans env / headers
@@ -585,11 +670,18 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
         for key, value in block.items():
             if not isinstance(value, str) or not value.strip():
                 continue
+            # Mot de passe dans une URL (DATABASE_URL…), quel que soit le nom de la clé.
+            if _has_url_password(value):
+                add(
+                    HARDCODED_ENV_SECRET,
+                    f"Server '{name}' sets {block_name}.{key} to a URL with an embedded "
+                    f"password ({url_origin(value)}).",
+                )
+                continue
             if not _SENSITIVE_KEY.search(str(key)):
                 continue
-            # "Bearer ${TOKEN}" -> on vérifie la partie après "Bearer "
-            candidate = value.strip().removeprefix("Bearer ").strip()
-            if _ENV_REFERENCE.match(candidate):
+            # Références (${TOKEN}, %TOKEN%…), modèles (<YOUR_KEY>) : pas des secrets.
+            if _literal_secret(value) is None:
                 continue
             add(
                 HARDCODED_ENV_SECRET,

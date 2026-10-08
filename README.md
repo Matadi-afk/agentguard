@@ -51,13 +51,13 @@ Every value in `examples/` is a fake placeholder.
 |----|----------|-----------------|
 | AG001 | critical | API keys and tokens written in clear (Anthropic, OpenAI, GitHub, AWS, Google, Hugging Face, Slack, Stripe, private keys) |
 | AG100 | medium | MCP config that cannot be parsed (some clients still run the servers they can read from a broken file) |
-| AG101 | high | MCP server launched through `bash -c`, `cmd /c`, PowerShell… |
-| AG102 | medium | `npx` / `uvx` package without a pinned version |
-| AG103 | high | Secret written literally in an MCP server's `env` or `headers` |
-| AG104 | high | Filesystem server exposed to `/`, `~` or `C:\` |
+| AG101 | high | Shell running a script (`bash -c`, `pwsh -Command`), `cmd /c` with a command line or special characters, inline code (`node -e`, `python -c`) |
+| AG102 | medium | `npx` / `uvx` package without an exact version (`^1.0`, `@beta`, `>=1` are not pinned) |
+| AG103 | high | Secret written literally in an MCP server's `env` or `headers`, including passwords inside URLs |
+| AG104 | high | Filesystem server exposed to `/`, a whole drive or a whole home directory |
 | AG105 | high | Remote MCP server reached over plain `http://` |
-| AG106 | high | Docker/Podman server with `--privileged`, host namespaces, `/` or Docker socket mounts |
-| AG107 | high | Package installed from git or a URL instead of the npm / PyPI registry |
+| AG106 | high | Docker/Podman server with `--privileged`, host namespaces, or mounts of `/`, the home directory, `.ssh`/`.aws`… or the Docker socket |
+| AG107 | high | Package installed from git, a URL or a GitHub shorthand instead of the npm / PyPI registry |
 | AG108 | medium | Tools auto-approved (`alwaysAllow`, `autoApprove`, `trust: true`): no human confirmation |
 
 Run `agentguard rules` to list them from the CLI.
@@ -75,6 +75,8 @@ agentguard reads every `.json` / `.jsonc` file (comments and trailing commas all
 | Zed | `context_servers` in `settings.json` |
 
 Other JSON files are only reported when they contain MCP servers. YAML (Continue) and TOML (Codex CLI) configurations are not supported yet.
+
+Wrapped commands are unwrapped before being checked: `cmd /c npx …`, `wsl …`, `env VAR=1 …`, `sudo …` and `bash -c "…"` are all analysed for the program they really start.
 
 ## Usage
 

@@ -11,8 +11,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Configurations that cannot be audited are reported** (AG100) instead of being silently skipped, so a tolerant AI client cannot run a server agentguard never saw: oversized, binary-looking or symbolic-link configuration files and folders of AI clients (`.vscode/`, `.cursor/`, `.gemini/`, `.claude/`…), and broken JSON files that declare MCP servers.
 - Files encoded in **UTF-16 or UTF-32** (with a byte-order mark), which VS Code opens, are now read by every rule, including secret detection, instead of being skipped as binary.
 - AG105 also checks Gemini CLI's `httpUrl` key.
+- **Wrapped commands are analysed**: `cmd /c`, `wsl`, `env`, `sudo`, `timeout`, `nice` and the script given to `bash -c` / `pwsh -Command` are unwrapped, so AG102, AG104, AG106 and AG107 check the program that really runs. Windows launchers such as `npx.cmd` are recognised.
+- AG101 also detects `bash -lc` and grouped options, `env sh -c`, `wsl bash -c`, abbreviated PowerShell options (`-e`, `-ec`, `-Com`…) and **inline code** (`node -e`, `python -c`, `ruby -e`, `perl -e`, `php -r`, `deno eval`).
+- AG107 also detects GitHub shorthands (`npx owner/repo`), scp-style git addresses (`git@host:owner/repo`), Python direct references (`name @ git+https://…`) and Mercurial/Subversion/Bazaar sources.
+- AG103 also detects passwords inside URLs (`postgres://user:password@host`) whatever the variable name, and literal default values in `${VAR:-default}`.
 
 ### Changed
+- AG101: `cmd /c` that starts a program given as separate words, without special characters (`& | < > ^ % !`), is no longer reported, since it is the documented way to start `npx` on Windows; the program it starts is analysed instead. A single command-line string or special characters are still reported.
+- AG102 only accepts **exact** versions: `pkg@^1.0.0`, `pkg@~1.2`, `pkg@1`, `pkg@beta`, `pkg>=1.0` or `pkg==1.*` are now reported as unpinned.
+- AG104 and AG106 also cover whole home directories (`/home/name`, `/Users/name`, `C:\Users\name`, `%USERPROFILE%`, `$env:USERPROFILE`), any drive root, `/root`, and credential folders (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`, `.azure`).
+- AG103 no longer reports documentation placeholders (`<YOUR_API_KEY>`, `your-api-key-here`, `xxxx`) or references written as `%VAR%`, `$env:VAR` or `${{ secrets.NAME }}`.
 - AG100 (unreadable MCP configuration) is now **medium**: some AI clients still start the servers they can read from a broken file, so an unreadable file may hide a server.
 
 ## [0.2.2] - 2026-10-07
