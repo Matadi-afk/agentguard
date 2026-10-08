@@ -50,7 +50,7 @@ Every value in `examples/` is a fake placeholder.
 | ID | Severity | What it detects |
 |----|----------|-----------------|
 | AG001 | critical | API keys and tokens written in clear (Anthropic, OpenAI, GitHub, AWS, Google, Hugging Face, Slack, Stripe, private keys) |
-| AG100 | low | MCP config that is not valid JSON (cannot be audited) |
+| AG100 | medium | MCP config that cannot be parsed (some clients still run the servers they can read from a broken file) |
 | AG101 | high | MCP server launched through `bash -c`, `cmd /c`, PowerShell… |
 | AG102 | medium | `npx` / `uvx` package without a pinned version |
 | AG103 | high | Secret written literally in an MCP server's `env` or `headers` |
@@ -61,6 +61,20 @@ Every value in `examples/` is a fake placeholder.
 | AG108 | medium | Tools auto-approved (`alwaysAllow`, `autoApprove`, `trust: true`): no human confirmation |
 
 Run `agentguard rules` to list them from the CLI.
+
+## Supported configuration files
+
+agentguard reads every `.json` / `.jsonc` file (comments and trailing commas allowed) and looks for MCP servers wherever each AI client keeps them:
+
+| Client | Where the servers live |
+|---|---|
+| Claude Desktop, Cursor, Windsurf, Cline, Roo Code, Kiro, Amazon Q, GitHub Copilot CLI | `mcpServers` |
+| Claude Code | `.mcp.json`, and `~/.claude.json` (user and per-project servers) |
+| Gemini CLI | `mcpServers` in `.gemini/settings.json` and extensions (`url`, `httpUrl`) |
+| VS Code | `servers` in `.vscode/mcp.json`, `mcp.servers` in settings, `devcontainer.json` customizations |
+| Zed | `context_servers` in `settings.json` |
+
+Other JSON files are only reported when they contain MCP servers. YAML (Continue) and TOML (Codex CLI) configurations are not supported yet.
 
 ## Usage
 

@@ -4,10 +4,20 @@ MCP (Model Context Protocol) permet à un agent IA (Claude, Cursor, VS Code…)
 d'utiliser des outils externes. Une mauvaise config peut donner à l'IA, ou
 à quelqu'un qui la manipule par injection de prompt, un accès bien trop large.
 
-Formats de fichiers reconnus :
-  {"mcpServers": {"nom": {...}}}           Claude Desktop, Cursor, .mcp.json
-  {"servers": {"nom": {...}}}              VS Code (.vscode/mcp.json)
-  {"mcp": {"servers": {"nom": {...}}}}     VS Code (settings.json)
+Emplacements des serveurs reconnus (documentation officielle, octobre 2026) :
+  {"mcpServers": {...}}                       Claude Desktop, Claude Code, Cursor, Gemini CLI,
+                                              Cline, Roo Code, Windsurf, Kiro, Amazon Q…
+  {"servers": {...}}                          VS Code (.vscode/mcp.json), fichiers « mcp » seulement
+  {"mcp": {"servers": {...}}}                 VS Code, ancien format de settings.json
+  {"customizations": {"vscode": {"mcp":
+      {"servers": {...}}}}}                   conteneur de développement (devcontainer.json)
+  {"context_servers": {...}}                  Zed (settings.json)
+  {"projects": {"/chemin": {"mcpServers"}}}   Claude Code (~/.claude.json, serveurs par projet)
+
+Tout fichier .json ou .jsonc est lu, commentaires compris (voir jsonc.py) ; il n'est
+analysé que s'il contient l'une de ces structures. La détection se fait APRÈS la
+lecture : un nom de clé écrit avec des échappements (« mcp\\u0053ervers ») ne
+permet pas de cacher un serveur.
 """
 
 from __future__ import annotations
@@ -17,16 +27,23 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
+from agentguard import jsonc
 from agentguard.models import Finding, Rule, Severity
 from agentguard.redact import redact, redact_url, url_origin
 
 # --- Définition des règles -----------------------------------------------------
 
+# Gravité moyenne (décision du 8 octobre 2026) : certains outils IA tolèrent les
+# erreurs de syntaxe et lancent quand même les serveurs qu'ils ont pu lire. Un
+# fichier abîmé exprès pourrait donc cacher un serveur à agentguard.
 INVALID_CONFIG = Rule(
     id="AG100",
     title="Unreadable MCP configuration",
-    severity=Severity.LOW,
-    remediation="Fix the JSON syntax so the configuration can be audited.",
+    severity=Severity.MEDIUM,
+    remediation=(
+        "Fix the JSON syntax so the configuration can be audited. Some AI clients still "
+        "start the servers they can read from a broken file."
+    ),
 )
 SHELL_EXECUTION = Rule(
     id="AG101",
@@ -113,12 +130,44 @@ RULES = [
 
 # --- Constantes de détection ---------------------------------------------------
 
+# Fichiers propres à MCP : s'ils sont illisibles, on le signale (AG100), et la clé
+# « servers » (VS Code) n'y est reconnue que là. Les autres fichiers JSON sont lus
+# aussi, mais restent silencieux s'ils sont illisibles ou sans serveur MCP.
 MCP_CONFIG_NAMES = {
-    "mcp.json",
-    ".mcp.json",
-    "mcp_config.json",
-    "claude_desktop_config.json",
+    "mcp.json",  # VS Code, Cursor, Roo Code, Kiro, Amazon Q
+    ".mcp.json",  # Claude Code, VS Code
+    "mcp_config.json",  # Windsurf / Devin Desktop
+    "claude_desktop_config.json",  # Claude Desktop
+    "cline_mcp_settings.json",  # Cline
+    "mcp_settings.json",  # Roo Code (global)
+    "mcp-config.json",  # GitHub Copilot CLI
 }
+_JSON_SUFFIXES = (".json", ".jsonc")
+# Dossiers de configuration des outils IA : un fichier JSON qu'on n'y peut pas lire
+# (trop gros, binaire, lien symbolique…) est signalé, car l'outil, lui, peut le lire.
+_CLIENT_FOLDERS = {
+    ".amazonq",
+    ".claude",
+    ".codeium",
+    ".codex",
+    ".continue",
+    ".copilot",
+    ".cursor",
+    ".devcontainer",
+    ".devin",
+    ".gemini",
+    ".kiro",
+    ".roo",
+    ".vscode",
+    ".windsurf",
+    ".zed",
+}
+# Clés qui annoncent des serveurs MCP. Cherchées dans le texte brut d'un fichier
+# JSON abîmé, après décodage des échappements « \\uXXXX ».
+_MCP_MARKERS = ('"mcpServers"', '"context_servers"', '"mcp"')
+_UNICODE_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
+# Clés qui désignent l'adresse d'un serveur distant, selon l'outil.
+_URL_KEYS = ("url", "serverUrl", "httpUrl")
 _SHELLS = {"sh", "bash", "zsh", "dash", "cmd", "powershell", "pwsh"}
 _SHELL_EXEC_FLAGS = {"-c", "/c", "/k", "-command", "-encodedcommand", "-enc"}
 _PACKAGE_RUNNERS = {"npx", "pnpx", "bunx", "uvx"}
@@ -207,16 +256,64 @@ def _normalize_path(arg: str) -> str:
 
 
 def is_mcp_config(path: PurePosixPath) -> bool:
-    """Le fichier ressemble-t-il à une configuration MCP ?"""
+    """Le fichier porte-t-il un nom propre aux configurations MCP ?"""
     name = path.name.lower()
     return name in MCP_CONFIG_NAMES or name.endswith(".mcp.json")
 
 
+def is_json_file(path: PurePosixPath) -> bool:
+    """Fichier JSON quelconque, à lire au cas où il contiendrait des serveurs MCP."""
+    return path.name.lower().endswith(_JSON_SUFFIXES)
+
+
+def is_client_config_path(path: PurePosixPath) -> bool:
+    """Chemin d'une configuration d'outil IA (fichier MCP, ou JSON d'un dossier connu)."""
+    name = path.name.lower()
+    if is_mcp_config(path) or name == ".claude.json":
+        return True
+    in_client_folder = any(part.lower() in _CLIENT_FOLDERS for part in path.parts)
+    return in_client_folder and (is_json_file(path) or name in _CLIENT_FOLDERS)
+
+
+def unreadable_config_finding(path: str) -> Finding:
+    """Fichier de configuration qu'agentguard n'a pas pu lire du tout."""
+    return Finding(
+        rule=INVALID_CONFIG,
+        path=path,
+        line=1,
+        message=(
+            "This AI client configuration could not be read (too large, binary or "
+            "unreadable), so it cannot be audited."
+        ),
+    )
+
+
+def symlinked_config_finding(path: str) -> Finding:
+    """Configuration (ou dossier de configuration) qui est un lien symbolique."""
+    return Finding(
+        rule=INVALID_CONFIG,
+        path=path,
+        line=1,
+        message=(
+            "This AI client configuration is a symbolic link. agentguard does not follow "
+            "links (they can point outside the project): check what it points to."
+        ),
+    )
+
+
+def _mentions_mcp(text: str) -> bool:
+    """Le texte brut annonce-t-il des serveurs MCP (même avec des échappements) ?"""
+    decoded = _UNICODE_ESCAPE.sub(lambda m: chr(int(m.group(1), 16)), text)
+    return any(marker in decoded for marker in _MCP_MARKERS)
+
+
 # Une chaîne JSON complète, puis le « : » qui en fait une clé. On parcourt les
 # chaînes ENTIÈRES, sans jamais redémarrer au milieu de l'une d'elles : temps
-# linéaire, même avec des milliers de « \\" » (le fichier a déjà été validé
-# par json.loads, donc chaque guillemet trouvé ici ouvre bien une chaîne).
-_JSON_STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+# linéaire, même avec des milliers de « \\" ». Le texte a déjà été accepté par
+# json.loads, donc chaque guillemet trouvé ici ouvre bien une chaîne. Une chaîne
+# peut contenir un saut de ligne brut (lecture tolérante, strict=False) : le motif
+# l'accepte, sinon il se décalerait et redeviendrait quadratique.
+_JSON_STRING = re.compile(r'"[^"\\]*(?:\\[\s\S][^"\\]*)*"')
 _KEY_SEPARATOR = re.compile(r"\s*:")
 
 
@@ -243,17 +340,51 @@ def _key_lines(text: str) -> dict[str, int]:
     return lines
 
 
-def _extract_servers(data: object) -> dict[str, dict]:
+def _dig(data: object, *keys: str) -> object:
+    """data[k1][k2]… sans jamais lever d'exception (None si le chemin n'existe pas)."""
+    for key in keys:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
+
+
+def _server_groups(data: object, mcp_named: bool) -> list[tuple[str, dict[str, dict]]]:
+    """Tous les groupes de serveurs d'un fichier : (précision d'affichage, serveurs)."""
     if not isinstance(data, dict):
-        return {}
-    for candidate in (
-        data.get("mcpServers"),
-        data.get("servers"),
-        (data.get("mcp") or {}).get("servers") if isinstance(data.get("mcp"), dict) else None,
-    ):
-        if isinstance(candidate, dict):
-            return {k: v for k, v in candidate.items() if isinstance(v, dict)}
-    return {}
+        return []
+    candidates: list[tuple[str, object]] = [
+        ("", data.get("mcpServers")),
+        ("", _dig(data, "mcp", "servers")),
+        ("", _dig(data, "customizations", "vscode", "mcp", "servers")),
+        ("", data.get("context_servers")),
+    ]
+    if mcp_named:
+        candidates.append(("", data.get("servers")))
+    projects = data.get("projects")
+    if isinstance(projects, dict):
+        for project_path, project in projects.items():
+            candidates.append((f" (project {project_path})", _dig(project, "mcpServers")))
+    groups = []
+    for label, servers in candidates:
+        if isinstance(servers, dict):
+            valid = {str(k): v for k, v in servers.items() if isinstance(v, dict)}
+            if valid:
+                groups.append((label, valid))
+    return groups
+
+
+def _normalize_server(server: dict) -> dict:
+    """Zed (ancien format) : "command": {"path", "args", "env"} -> forme commune."""
+    command = server.get("command")
+    if not isinstance(command, dict):
+        return server
+    merged = dict(server)
+    merged["command"] = command.get("path")
+    for key in ("args", "env"):
+        if key in command and key not in server:
+            merged[key] = command[key]
+    return merged
 
 
 def _executable_name(command: str) -> str:
@@ -465,11 +596,15 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
                 f"Server '{name}' sets {block_name}.{key} to a literal value ({redact(value)}).",
             )
 
-    # AG105 : serveur distant en HTTP non chiffré
-    url = server.get("url") or server.get("serverUrl")
-    if isinstance(url, str):
+    # AG105 : serveur distant en HTTP non chiffré (« url », « serverUrl » ou « httpUrl »)
+    reported_hosts: set[str] = set()
+    for url_key in _URL_KEYS:
+        url = server.get(url_key)
+        if not isinstance(url, str):
+            continue
         host = _http_host(url)
-        if host is not None and host not in _LOCAL_HOSTS:
+        if host is not None and host not in _LOCAL_HOSTS and host not in reported_hosts:
+            reported_hosts.add(host)
             shown = host or "an unreadable address"
             add(INSECURE_TRANSPORT, f"Server '{name}' connects to {shown} over HTTP.")
 
@@ -489,23 +624,37 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
     return findings
 
 
-def check_text(text: str, path: str) -> list[Finding]:
-    """Analyse le contenu d'un fichier de configuration MCP."""
+def check_text(text: str, path: str, *, mcp_named: bool | None = None) -> list[Finding]:
+    """Analyse un fichier JSON (ou JSONC) qui peut contenir des serveurs MCP.
+
+    `mcp_named` : le fichier porte-t-il un nom propre à MCP ? Par défaut, déduit du
+    chemin. Un fichier MCP illisible est signalé ; un autre fichier JSON illisible
+    reste silencieux (ce n'est probablement pas une configuration MCP).
+    """
+    if mcp_named is None:
+        mcp_named = is_mcp_config(PurePosixPath(path))
     try:
-        data = json.loads(text)
+        data, parsed_text = jsonc.loads(text)
     except json.JSONDecodeError as error:
+        # Un fichier JSON ordinaire illisible reste silencieux… sauf s'il annonce des
+        # serveurs MCP : un outil tolérant aux erreurs pourrait quand même les lancer.
+        if not mcp_named and not _mentions_mcp(text):
+            return []
+        hint = "" if mcp_named else " The file seems to declare MCP servers."
         return [
             Finding(
                 rule=INVALID_CONFIG,
                 path=path,
                 line=error.lineno,
-                message=f"Invalid JSON: {error.msg}.",
+                message=f"Invalid JSON: {error.msg}.{hint}",
             )
         ]
     except (RecursionError, ValueError):
         # Sécurité : un JSON imbriqué à l'extrême (« [[[[…]]]] ») épuise la pile
         # de Python. Sans ce garde-fou, un seul fichier piégé ferait planter
         # tout le scan (déni de service en CI). On le signale comme illisible.
+        if not mcp_named and not _mentions_mcp(text):
+            return []
         return [
             Finding(
                 rule=INVALID_CONFIG,
@@ -515,21 +664,28 @@ def check_text(text: str, path: str) -> list[Finding]:
             )
         ]
 
-    key_lines = _key_lines(text)
+    groups = _server_groups(data, mcp_named)
+    if not groups:
+        return []
+    # Numéros de ligne calculés sur le texte effectivement lu (commentaires
+    # remplacés par des espaces, positions identiques).
+    key_lines = _key_lines(parsed_text)
     findings: list[Finding] = []
-    for name, server in _extract_servers(data).items():
-        line = key_lines.get(name, 1)
-        try:
-            findings.extend(_check_server(name, server, line, path))
-        except Exception:
-            # Défense en profondeur : un contenu imprévu dans UN serveur ne doit ni
-            # faire planter le scan, ni masquer les problèmes des autres serveurs.
-            findings.append(
-                Finding(
-                    rule=INVALID_CONFIG,
-                    path=path,
-                    line=line,
-                    message=f"Server '{name}' could not be analysed (unexpected content).",
+    for label, servers in groups:
+        for raw_name, server in servers.items():
+            name = raw_name + label
+            line = key_lines.get(raw_name, 1)
+            try:
+                findings.extend(_check_server(name, _normalize_server(server), line, path))
+            except Exception:
+                # Défense en profondeur : un contenu imprévu dans UN serveur ne doit ni
+                # faire planter le scan, ni masquer les problèmes des autres serveurs.
+                findings.append(
+                    Finding(
+                        rule=INVALID_CONFIG,
+                        path=path,
+                        line=line,
+                        message=f"Server '{name}' could not be analysed (unexpected content).",
+                    )
                 )
-            )
     return findings

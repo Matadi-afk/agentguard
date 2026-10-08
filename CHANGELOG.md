@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- **Real-world configuration files**: agentguard now reads every `.json` / `.jsonc` file and finds MCP servers wherever the main AI clients keep them: VS Code (`.vscode/mcp.json`, legacy `mcp.servers` in settings, `devcontainer.json`), Claude Code (`~/.claude.json`, user and per-project servers), Gemini CLI (`.gemini/settings.json`, extensions), Zed (`context_servers`, both command formats), Cline, Roo Code, Kiro, Amazon Q and GitHub Copilot CLI files. Other JSON files are only reported when they contain MCP servers.
+- **JSON with comments and trailing commas** (JSONC), as written by VS Code, Zed or Cursor. It is read in linear time, positions and line numbers are preserved, and a comment can never hide a syntax error. Raw control characters inside strings are tolerated, as lenient client parsers do.
+- **Configurations that cannot be audited are reported** (AG100) instead of being silently skipped, so a tolerant AI client cannot run a server agentguard never saw: oversized, binary-looking or symbolic-link configuration files and folders of AI clients (`.vscode/`, `.cursor/`, `.gemini/`, `.claude/`…), and broken JSON files that declare MCP servers.
+- Files encoded in **UTF-16 or UTF-32** (with a byte-order mark), which VS Code opens, are now read by every rule, including secret detection, instead of being skipped as binary.
+- AG105 also checks Gemini CLI's `httpUrl` key.
+
+### Changed
+- AG100 (unreadable MCP configuration) is now **medium**: some AI clients still start the servers they can read from a broken file, so an unreadable file may hide a server.
+
 ## [0.2.2] - 2026-10-07
 
 ### Security

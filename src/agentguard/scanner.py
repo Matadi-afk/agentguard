@@ -10,6 +10,7 @@ Précautions de sécurité du parcours :
 
 from __future__ import annotations
 
+import codecs
 import fnmatch
 import os
 import stat
@@ -22,6 +23,15 @@ from agentguard.rules import mcp, secrets
 
 MAX_FILE_SIZE = 1_000_000  # 1 Mo
 _BINARY_SNIFF_SIZE = 8192
+# En-têtes (BOM) des fichiers UTF-32 et UTF-16, que VS Code sait ouvrir. Sans eux, leurs
+# octets nuls les feraient prendre pour des fichiers binaires, ignorés par toutes les
+# règles. UTF-32 d'abord : son en-tête commence comme celui d'UTF-16.
+_WIDE_ENCODINGS = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
 
 DEFAULT_IGNORED_DIRS = {
     ".git",
@@ -56,11 +66,13 @@ def iter_files(
     root: Path,
     excludes: Iterable[str] = (),
     on_error: Callable[[OSError], None] | None = None,
+    on_symlink: Callable[[Path], None] | None = None,
 ) -> Iterator[Path]:
     """Liste les fichiers à analyser, sans suivre les liens symboliques.
 
     `on_error` est appelé pour chaque dossier illisible : sans lui, os.walk les
     ignorerait en silence et le rapport dirait « No issues found » à tort.
+    `on_symlink` est appelé pour chaque lien symbolique ignoré (fichier ou dossier).
     """
     excludes = list(excludes)
     if root.is_file():
@@ -68,23 +80,29 @@ def iter_files(
         return
     for current, dirnames, filenames in os.walk(root, onerror=on_error, followlinks=False):
         current_path = Path(current)
-        # Modifier `dirnames` sur place empêche os.walk de descendre dans ces dossiers.
-        dirnames[:] = sorted(
-            d
-            for d in dirnames
-            if d not in DEFAULT_IGNORED_DIRS
-            and not (current_path / d).is_symlink()
-            and not _is_excluded(
-                PurePosixPath((current_path / d).relative_to(root).as_posix()), excludes
-            )
-        )
+        kept: list[str] = []
+        for dirname in sorted(dirnames):
+            if dirname in DEFAULT_IGNORED_DIRS:
+                continue
+            directory = current_path / dirname
+            if _is_excluded(PurePosixPath(directory.relative_to(root).as_posix()), excludes):
+                continue
+            if directory.is_symlink():
+                if on_symlink is not None:
+                    on_symlink(directory)
+                continue
+            kept.append(dirname)
+        # Modifier `dirnames` sur place empêche os.walk de descendre dans les autres.
+        dirnames[:] = kept
         for filename in sorted(filenames):
             path = current_path / filename
-            if path.is_symlink():
+            if _is_excluded(PurePosixPath(path.relative_to(root).as_posix()), excludes):
                 continue
-            relative = PurePosixPath(path.relative_to(root).as_posix())
-            if not _is_excluded(relative, excludes):
-                yield path
+            if path.is_symlink():
+                if on_symlink is not None:
+                    on_symlink(path)
+                continue
+            yield path
 
 
 def _read_text(path: Path) -> str | None:
@@ -99,7 +117,12 @@ def _read_text(path: Path) -> str | None:
             raw = handle.read(MAX_FILE_SIZE + 1)  # lecture bornée, même si le fichier grossit
     except OSError:
         return None
-    if len(raw) > MAX_FILE_SIZE or b"\0" in raw[:_BINARY_SNIFF_SIZE]:  # octet nul = binaire
+    if len(raw) > MAX_FILE_SIZE:
+        return None
+    for bom, encoding in _WIDE_ENCODINGS:
+        if raw.startswith(bom):
+            return raw.decode(encoding, errors="replace")
+    if b"\0" in raw[:_BINARY_SNIFF_SIZE]:  # octet nul = fichier binaire
         return None
     # « utf-8-sig » retire l'éventuel BOM : sinon json.loads refuserait le fichier et
     # une configuration dangereuse échapperait à l'analyse.
@@ -118,18 +141,32 @@ def scan(target: str | Path, excludes: Iterable[str] = ()) -> ScanResult:
     def count_unreadable_directory(_error: OSError) -> None:
         result.files_skipped += 1
 
-    for path in iter_files(root, excludes, on_error=count_unreadable_directory):
+    def report_symlinked_config(path: Path) -> None:
+        # Un outil IA suit les liens ; agentguard non (ils peuvent sortir du projet).
+        # Une configuration atteinte par un lien ne doit donc pas passer inaperçue.
+        relative = PurePosixPath(path.relative_to(base).as_posix())
+        if mcp.is_client_config_path(relative):
+            result.findings.append(mcp.symlinked_config_finding(relative.as_posix()))
+
+    for path in iter_files(
+        root, excludes, on_error=count_unreadable_directory, on_symlink=report_symlinked_config
+    ):
+        relative = PurePosixPath(path.relative_to(base).as_posix())
+        rel_str = relative.as_posix()
         text = _read_text(path)
         if text is None:
             result.files_skipped += 1
+            if mcp.is_client_config_path(relative):
+                result.findings.append(mcp.unreadable_config_finding(rel_str))
             continue
         result.files_scanned += 1
-        relative = PurePosixPath(path.relative_to(base).as_posix())
-        rel_str = relative.as_posix()
 
         result.findings.extend(secrets.check_text(text, rel_str))
-        if mcp.is_mcp_config(relative):
-            result.findings.extend(mcp.check_text(text, rel_str))
+        # Fichiers MCP connus ET tout autre fichier JSON : de nombreux outils IA
+        # rangent leurs serveurs dans des fichiers aux noms génériques (settings.json…).
+        mcp_named = mcp.is_mcp_config(relative)
+        if mcp_named or mcp.is_json_file(relative):
+            result.findings.extend(mcp.check_text(text, rel_str, mcp_named=mcp_named))
 
     # Tri : le plus grave d'abord, puis par fichier et ligne.
     result.findings.sort(key=lambda f: (-f.severity.rank, f.path, f.line, f.rule.id))
