@@ -28,7 +28,7 @@
     },
     "notes": {
       "command": "npx",
-      "args": ["-y", "github:someone/notes-mcp"],
+      "args": ["-y", "github:not--a--real--user/notes-mcp"],
       "alwaysAllow": ["write_note", "delete_note"]
     }
   }

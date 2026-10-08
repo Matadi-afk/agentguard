@@ -245,6 +245,7 @@ def test_line_numbers_survive_comments(tmp_path) -> None:
         ("mcp.json", True),
         (".mcp.json", True),
         ("team.mcp.json", True),
+        ("vscode.mcp.jsonc", True),
         ("claude_desktop_config.json", True),
         ("mcp_config.json", True),
         ("cline_mcp_settings.json", True),

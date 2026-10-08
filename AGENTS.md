@@ -28,10 +28,10 @@ src/configwarden/
   rules/
     __init__.py     ALL_RULES = liste de toutes les règles
     secrets.py      CW001 : secrets en clair (regex par fournisseur)
-    mcp.py          CW100-CW108 : configurations MCP dangereuses ; lit tout fichier .json/.jsonc (voir « Formats reconnus »)
+    mcp.py          CW100-CW109 : configurations MCP dangereuses et réglages « tout approuver » ; lit tout fichier .json/.jsonc (voir « Formats reconnus »)
   reporters/        text.py, json_reporter.py, sarif.py (+ RENDERERS dans __init__)
 tests/              pytest ; conftest.py fournit fake_secret() et write_mcp ; test_hardening.py rejoue les attaques connues ; test_real_configs.py couvre le format de chaque outil IA
-examples/           vulnerable-mcp/ (doit déclencher CW101-CW108) et safe-mcp/ (doit rester propre)
+examples/           vulnerable-mcp/ (doit déclencher CW101-CW109) et safe-mcp/ (doit rester propre). Fichiers nommés pour qu'aucun outil IA ne les charge (jamais `.vscode/mcp.json`, `.mcp.json`, `.claude/settings.json`…)
 docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macOS)
 ```
 
@@ -49,8 +49,9 @@ docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macO
 | CW106 | high | rules/mcp.py | Conteneur Docker/Podman qui casse l'isolation (`--privileged`, `=host`, montage de `/`, du dossier personnel, de `.ssh`/`.aws`… ou du socket Docker) |
 | CW107 | high | rules/mcp.py | Paquet installé depuis git, une URL, un raccourci GitHub `auteur/projet` ou `nom @ url` (remplace CW102 pour ce paquet) |
 | CW108 | medium | rules/mcp.py | Outils approuvés sans confirmation (`alwaysAllow`, `autoApprove`, `trust: true`) |
+| CW109 | high | rules/mcp.py | Réglage de l'outil IA qui approuve tout : Claude Code (`enableAllProjectMcpServers`, `bypassPermissions`, `skipDangerousModePermissionPrompt`), VS Code (`chat.tools.global.autoApprove`), Zed, Cursor (`*:*`), Kiro (Autopilot) |
 
-Prochain ID libre : **CW002** (secrets) ou **CW110** (MCP). **CW109** est réservé à la règle « l'outil IA approuve tout sans demander » (décidée le 8 octobre 2026).
+Prochain ID libre : **CW002** (secrets) ou **CW110** (MCP).
 
 ## Formats reconnus
 
@@ -65,7 +66,7 @@ configwarden lit **tout fichier `.json` ou `.jsonc`** (commentaires et virgules 
 | `context_servers` | Zed (`command` texte, ou objet `{path, args, env}` dans l'ancien format) |
 | `projects.<chemin>.mcpServers` | Claude Code (`~/.claude.json`, serveurs par projet) |
 
-- Fichiers « nommés MCP » (illisibles → CW100) : `mcp.json`, `.mcp.json`, `*.mcp.json`, `mcp_config.json`, `claude_desktop_config.json`, `cline_mcp_settings.json`, `mcp_settings.json`, `mcp-config.json`. Les autres fichiers JSON illisibles restent silencieux.
+- Fichiers « nommés MCP » (illisibles → CW100) : `mcp.json`, `.mcp.json`, `*.mcp.json`, `*.mcp.jsonc`, `mcp_config.json`, `claude_desktop_config.json`, `cline_mcp_settings.json`, `mcp_settings.json`, `mcp-config.json`. Les autres fichiers JSON illisibles restent silencieux.
 - Adresses distantes : `url`, `serverUrl` (Windsurf), `httpUrl` (Gemini CLI).
 - **Jamais de silence sur une configuration non auditable** (CW100) : fichier MCP ou JSON d'un dossier d'outil IA (`.vscode/`, `.cursor/`, `.gemini/`, `.claude/`…) trop gros, d'apparence binaire ou lien symbolique ; fichier JSON abîmé qui annonce des serveurs. Un outil tolérant pourrait lancer ce que configwarden n'a pas lu.
 - Pas encore pris en charge (voir `IDEES.md`) : YAML (Continue), TOML (Codex CLI).
@@ -80,7 +81,7 @@ pip install -e ".[dev]"                     # installation (une fois)
 pytest                                      # tests
 ruff check . ; ruff format .                # qualité + sécurité (règles Bandit "S")
 pre-commit run --all-files                  # tous les contrôles, dont gitleaks
-configwarden scan examples/vulnerable-mcp     # démo : 10 constats attendus
+configwarden scan examples/vulnerable-mcp     # démo : 13 constats attendus
 configwarden scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 ```
 
@@ -130,5 +131,5 @@ Fil rouge du projet : configwarden est un outil de sécurité, il doit être lui
 
 ## État du projet
 
-- Version 0.2.2 publiée (10 règles, deux séries de correctifs de sécurité). v0.3.0 en cours : vrais fichiers de configuration (jour 1), commandes enveloppées et angles morts CW101 à CW107 (jour 2). 357 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
+- Version 0.2.2 publiée (10 règles, deux séries de correctifs de sécurité). v0.3.0 en cours : vrais fichiers de configuration (jour 1), commandes enveloppées et angles morts CW101 à CW107 (jour 2), règle CW109 et SARIF (jour 3). 384 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
 - Cap fixé jusqu'au 4 novembre 2026 : publier sur GitHub, ajouter 3 règles, faire un premier post. Voir `IDEES.md` pour ce qui est volontairement mis de côté.

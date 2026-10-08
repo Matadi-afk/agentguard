@@ -47,11 +47,13 @@ INVALID_CONFIG = Rule(
 )
 SHELL_EXECUTION = Rule(
     id="CW101",
-    title="MCP server runs through a shell",
+    title="MCP server runs a shell script or inline code",
     severity=Severity.HIGH,
     remediation=(
-        "Call the server binary directly instead of `bash -c` / `cmd /c`. A shell "
-        "wrapper enables command injection and hides what is really executed."
+        "Call the server program directly, with its arguments as separate items (on Windows, "
+        "`cmd /c` followed by the program and its arguments is fine). A script given to "
+        "`bash -c`, a command-line string or inline code (`node -e`) enables command "
+        "injection and hides what really runs."
     ),
 )
 UNPINNED_PACKAGE = Rule(
@@ -116,6 +118,20 @@ AUTO_APPROVED_TOOLS = Rule(
     ),
 )
 
+# CW109 (décision du 8 octobre 2026) : un réglage de l'outil IA, et non d'un serveur,
+# qui supprime toute confirmation. Dans un dépôt, il transforme l'ouverture d'un
+# projet piégé en exécution automatique de ses serveurs et de ses outils.
+CLIENT_AUTO_APPROVE = Rule(
+    id="CW109",
+    title="AI client approves actions without confirmation",
+    severity=Severity.HIGH,
+    remediation=(
+        "Turn off the global auto-approve setting and approve servers and tools one by one. "
+        "Never commit such a setting to a repository: anyone who opens the project would run "
+        "its servers and tools without being asked."
+    ),
+)
+
 RULES = [
     INVALID_CONFIG,
     SHELL_EXECUTION,
@@ -126,6 +142,7 @@ RULES = [
     DANGEROUS_CONTAINER,
     UNTRUSTED_PACKAGE_SOURCE,
     AUTO_APPROVED_TOOLS,
+    CLIENT_AUTO_APPROVE,
 ]
 
 # --- Constantes de détection ---------------------------------------------------
@@ -303,7 +320,7 @@ def _normalize_path(arg: str) -> str:
 def is_mcp_config(path: PurePosixPath) -> bool:
     """Le fichier porte-t-il un nom propre aux configurations MCP ?"""
     name = path.name.lower()
-    return name in MCP_CONFIG_NAMES or name.endswith(".mcp.json")
+    return name in MCP_CONFIG_NAMES or name.endswith((".mcp.json", ".mcp.jsonc"))
 
 
 def is_json_file(path: PurePosixPath) -> bool:
@@ -417,6 +434,81 @@ def _server_groups(data: object, mcp_named: bool) -> list[tuple[str, dict[str, d
             if valid:
                 groups.append((label, valid))
     return groups
+
+
+def _auto_approve_settings(data: object) -> list[tuple[str, str]]:
+    """Réglages CW109 trouvés : (clé pour le numéro de ligne, description du réglage).
+
+    Réglages relevés dans la documentation officielle de chaque outil (8 octobre 2026).
+    Seules les valeurs exactes comptent (`true` booléen, chaîne précise) : un type
+    inattendu est ignoré, jamais une cause de plantage.
+    """
+    if not isinstance(data, dict):
+        return []
+    found: list[tuple[str, str]] = []
+
+    def flag(key: str, description: str) -> None:
+        found.append((key, description))
+
+    # Claude Code (.claude/settings.json, settings.local.json, ~/.claude/settings.json)
+    if data.get("enableAllProjectMcpServers") is True:
+        flag(
+            "enableAllProjectMcpServers",
+            "Claude Code approves every MCP server of the project automatically "
+            "(enableAllProjectMcpServers: true)",
+        )
+    if _dig(data, "permissions", "defaultMode") == "bypassPermissions":
+        flag(
+            "defaultMode",
+            "Claude Code runs every action without asking (permissions.defaultMode: "
+            "bypassPermissions)",
+        )
+    if data.get("skipDangerousModePermissionPrompt") is True:
+        flag(
+            "skipDangerousModePermissionPrompt",
+            "Claude Code skips the confirmation of its dangerous modes "
+            "(skipDangerousModePermissionPrompt: true)",
+        )
+    # VS Code (settings.json : clés « à plat »)
+    for key in ("chat.tools.global.autoApprove", "chat.tools.autoApprove"):
+        if data.get(key) is True:
+            flag(key, f"VS Code approves every tool call without asking ({key}: true)")
+    # Zed (settings.json : objets imbriqués)
+    if _dig(data, "agent", "always_allow_tool_actions") is True:
+        flag(
+            "always_allow_tool_actions",
+            "Zed runs every tool action without asking (agent.always_allow_tool_actions: true)",
+        )
+    if _dig(data, "agent", "tool_permissions", "default") == "allow":
+        flag(
+            "tool_permissions",
+            "Zed allows every tool by default (agent.tool_permissions.default: allow)",
+        )
+    if _dig(data, "session", "trust_all_worktrees") is True:
+        flag(
+            "trust_all_worktrees",
+            "Zed trusts every project folder, so project settings and servers load without a "
+            "prompt (session.trust_all_worktrees: true)",
+        )
+    # Cursor (.cursor/permissions.json et configuration de la ligne de commande)
+    allowlist = data.get("mcpAllowlist")
+    if isinstance(allowlist, list) and "*:*" in allowlist:
+        flag(
+            "mcpAllowlist",
+            "Cursor lets the agent run every MCP tool without asking (mcpAllowlist: *:*)",
+        )
+    cli_allow = _dig(data, "permissions", "allow")
+    if isinstance(cli_allow, list) and "Mcp(*:*)" in cli_allow:
+        flag("allow", "Cursor CLI lets the agent run every MCP tool without asking (Mcp(*:*))")
+    # Kiro (réglages de l'éditeur)
+    autonomy = data.get("kiroAgent.agentAutonomy")
+    if isinstance(autonomy, str) and autonomy.lower() == "autopilot":
+        flag(
+            "kiroAgent.agentAutonomy",
+            "Kiro runs in Autopilot mode: the agent's actions are not confirmed "
+            "(kiroAgent.agentAutonomy: Autopilot)",
+        )
+    return found
 
 
 def _normalize_server(server: dict) -> dict:
@@ -757,12 +849,21 @@ def check_text(text: str, path: str, *, mcp_named: bool | None = None) -> list[F
         ]
 
     groups = _server_groups(data, mcp_named)
-    if not groups:
+    settings = _auto_approve_settings(data)
+    if not groups and not settings:
         return []
     # Numéros de ligne calculés sur le texte effectivement lu (commentaires
     # remplacés par des espaces, positions identiques).
     key_lines = _key_lines(parsed_text)
-    findings: list[Finding] = []
+    findings: list[Finding] = [
+        Finding(
+            rule=CLIENT_AUTO_APPROVE,
+            path=path,
+            line=key_lines.get(key, 1),
+            message=f"{description}.",
+        )
+        for key, description in settings
+    ]
     for label, servers in groups:
         for raw_name, server in servers.items():
             name = raw_name + label

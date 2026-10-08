@@ -1,0 +1,11 @@
+{
+  // DEMO FILE - intentionally insecure VS Code MCP configuration (JSON with comments).
+  // Named so that no AI client loads it. "not--a--real--user" cannot be a GitHub account.
+  "servers": {
+    "windows-helper": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "github:not--a--real--user/helper-mcp"],
+    },
+  },
+}

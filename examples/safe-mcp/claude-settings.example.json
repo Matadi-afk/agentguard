@@ -1,0 +1,7 @@
+{
+  "_comment": "DEMO FILE - the secure version of examples/vulnerable-mcp/claude-settings.example.json.",
+  "enabledMcpjsonServers": ["github"],
+  "permissions": {
+    "defaultMode": "default"
+  }
+}

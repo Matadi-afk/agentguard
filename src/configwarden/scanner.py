@@ -55,6 +55,9 @@ class ScanResult:
     findings: list[Finding] = field(default_factory=list)
     files_scanned: int = 0
     files_skipped: int = 0
+    # Dossier de référence des chemins des constats (chemin absolu). Sert au rapport
+    # SARIF ; n'apparaît jamais dans un rapport (il peut contenir un nom d'utilisateur).
+    root: str = ""
 
 
 def _is_excluded(relative: PurePosixPath, patterns: Iterable[str]) -> bool:
@@ -136,7 +139,7 @@ def scan(target: str | Path, excludes: Iterable[str] = ()) -> ScanResult:
         raise FileNotFoundError(f"Path not found: {target}")
     base = root.parent if root.is_file() else root
 
-    result = ScanResult()
+    result = ScanResult(root=str(base))
 
     def count_unreadable_directory(_error: OSError) -> None:
         result.files_skipped += 1

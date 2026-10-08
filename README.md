@@ -29,7 +29,7 @@ configwarden scan .
 git clone https://github.com/Matadi-afk/configwarden
 cd configwarden
 pip install .
-configwarden scan examples/vulnerable-mcp   # 10 findings
+configwarden scan examples/vulnerable-mcp   # 13 findings
 configwarden scan examples/safe-mcp         # the fixed version: no issues
 ```
 
@@ -38,14 +38,14 @@ configwarden scan examples/safe-mcp         # the fixed version: no issues
     mcp.json:25  Server 'sandbox' runs a container with a mount of '/var/run/docker.sock'.
     Fix: Remove --privileged, host namespaces and mounts of '/', the home directory or the Docker socket. ...
 
-[HIGH] CW101 MCP server runs through a shell
+[HIGH] CW101 MCP server runs a shell script or inline code
     mcp.json:15  Server 'helper' executes commands through 'bash'.
     Fix: Call the server binary directly instead of `bash -c` / `cmd /c`. ...
 
-Scanned 1 file(s), skipped 0. 10 finding(s): 0 critical, 8 high, 2 medium, 0 low.
+Scanned 3 file(s), skipped 0. 13 finding(s): 0 critical, 11 high, 2 medium, 0 low.
 ```
 
-Every value in `examples/` is a fake placeholder.
+Every value in `examples/` is a fake placeholder, and the example files are named so that no AI client loads them.
 
 ## Rules
 
@@ -61,6 +61,7 @@ Every value in `examples/` is a fake placeholder.
 | CW106 | high | Docker/Podman server with `--privileged`, host namespaces, or mounts of `/`, the home directory, `.ssh`/`.aws`… or the Docker socket |
 | CW107 | high | Package installed from git, a URL or a GitHub shorthand instead of the npm / PyPI registry |
 | CW108 | medium | Tools auto-approved (`alwaysAllow`, `autoApprove`, `trust: true`): no human confirmation |
+| CW109 | high | AI client set to approve everything: Claude Code `enableAllProjectMcpServers` or `bypassPermissions`, VS Code `chat.tools.global.autoApprove`, Zed, Cursor `*:*`, Kiro Autopilot |
 
 Run `configwarden rules` to list them from the CLI.
 

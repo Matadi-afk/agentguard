@@ -36,7 +36,6 @@ Le parking à idées. Une idée qui ne sert pas la phrase du projet atterrit ici
   dans les paquets MCP.
 
 ## Angles morts relevés par la revue indépendante (7 octobre 2026)
-- **SARIF** : chemins relatifs au dossier scanné, pas à la racine du dépôt (ajouter `uriBaseId`).
 - **PowerShell encodé** : décoder `-EncodedCommand` (base64 UTF-16) pour analyser la commande
   cachée, au lieu de seulement la signaler.
 - **`env -S "…"`** : découper la chaîne passée à `env -S` comme un script.

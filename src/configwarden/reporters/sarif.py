@@ -8,6 +8,7 @@ que concurrent : ses résultats s'affichent dans leurs tableaux de bord.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from urllib.parse import quote
 
 from configwarden import __version__
@@ -31,7 +32,33 @@ _SECURITY_SCORE = {
 }
 
 
+def _prefix_from_current_folder(root: str) -> str | None:
+    """Chemin du dossier analysé vu depuis le dossier courant (« sub/ »), ou None.
+
+    En CI, la commande est lancée à la racine du dépôt : GitHub attend des chemins
+    relatifs à cette racine. Un dossier analysé hors du dossier courant garde des
+    chemins relatifs à lui-même : jamais de chemin absolu dans un rapport (il peut
+    révéler un nom d'utilisateur ou l'organisation des dossiers de la machine).
+    """
+    if not root:
+        return None
+    try:
+        relative = Path(root).relative_to(Path.cwd().resolve())
+    except (ValueError, OSError):
+        return None
+    prefix = relative.as_posix()
+    return "" if prefix == "." else prefix + "/"
+
+
+def _artifact_location(path: str, prefix: str | None) -> dict:
+    # Une URI SARIF doit être encodée (espace -> %20, # -> %23…).
+    if prefix is None:
+        return {"uri": quote(path, safe="/")}
+    return {"uri": quote(prefix + path, safe="/"), "uriBaseId": "%SRCROOT%"}
+
+
 def render_sarif(result: ScanResult, **_: object) -> str:
+    prefix = _prefix_from_current_folder(result.root)
     rules = [
         {
             "id": rule.id,
@@ -54,8 +81,7 @@ def render_sarif(result: ScanResult, **_: object) -> str:
             "locations": [
                 {
                     "physicalLocation": {
-                        # Une URI SARIF doit être encodée (espace -> %20, # -> %23…).
-                        "artifactLocation": {"uri": quote(f.path, safe="/")},
+                        "artifactLocation": _artifact_location(f.path, prefix),
                         "region": {"startLine": f.line},
                     }
                 }
