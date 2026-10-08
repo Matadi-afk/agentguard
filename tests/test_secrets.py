@@ -12,7 +12,8 @@ CASES = [
     ("AWS access key ID", fake_secret("AKIA", 16, "ABCDEFGH23")),
     ("Hugging Face token", fake_secret("hf_", 34)),
     ("Stripe live key", fake_secret("sk_" + "live_", 24)),
-    ("Private key", "-----BEGIN " + "RSA PRIVATE KEY-----"),
+    # Un en-tête seul (« ... » à la place de la clé) n'est plus signalé : il faut le contenu.
+    ("Private key", "-----BEGIN " + "RSA PRIVATE KEY-----\n" + "MIIEv" + "A" * 60),
 ]
 
 

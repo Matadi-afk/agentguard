@@ -71,10 +71,11 @@ def test_credentials_in_package_url_never_reach_any_report(write_mcp, tmp_path, 
 
 
 def test_credentials_in_uvx_from_are_redacted(write_mcp) -> None:
+    # v0.3.0 : le jeton écrit dans l'URL est aussi un secret en clair (CW103).
     args = ["--from", f"git+https://bob:{FAKE_TOKEN}@gitlab.com/x/y", "server"]
     findings = scan(write_mcp({"s": {"command": "uvx", "args": args}})).findings
-    assert [f.rule.id for f in findings] == ["CW107"]
-    assert FAKE_TOKEN not in findings[0].message
+    assert sorted(f.rule.id for f in findings) == ["CW103", "CW107"]
+    assert all(FAKE_TOKEN not in f.message for f in findings)
 
 
 # --- V2 : caractères de contrôle dans la sortie ---------------------------------

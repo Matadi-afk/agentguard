@@ -29,20 +29,20 @@ configwarden scan .
 git clone https://github.com/Matadi-afk/configwarden
 cd configwarden
 pip install .
-configwarden scan examples/vulnerable-mcp   # 13 findings
+configwarden scan examples/vulnerable-mcp   # 14 findings
 configwarden scan examples/safe-mcp         # the fixed version: no issues
 ```
 
 ```text
+[HIGH] CW101 MCP server runs a shell script or inline code
+    mcp.json:16  Server 'helper' executes commands through 'bash -c'.
+    Fix: Call the server program directly, with its arguments as separate items ...
+
 [HIGH] CW106 MCP server container escapes isolation
-    mcp.json:25  Server 'sandbox' runs a container with a mount of '/var/run/docker.sock'.
+    mcp.json:26  Server 'sandbox' runs a container with a mount of '/var/run/docker.sock'.
     Fix: Remove --privileged, host namespaces and mounts of '/', the home directory or the Docker socket. ...
 
-[HIGH] CW101 MCP server runs a shell script or inline code
-    mcp.json:15  Server 'helper' executes commands through 'bash'.
-    Fix: Call the server binary directly instead of `bash -c` / `cmd /c`. ...
-
-Scanned 3 file(s), skipped 0. 13 finding(s): 0 critical, 11 high, 2 medium, 0 low.
+Scanned 3 file(s), skipped 0. 14 finding(s): 0 critical, 12 high, 2 medium, 0 low.
 ```
 
 Every value in `examples/` is a fake placeholder, and the example files are named so that no AI client loads them.
@@ -51,17 +51,18 @@ Every value in `examples/` is a fake placeholder, and the example files are name
 
 | ID | Severity | What it detects |
 |----|----------|-----------------|
-| CW001 | critical | API keys and tokens written in clear (Anthropic, OpenAI, GitHub, AWS, Google, Hugging Face, Slack, Stripe, private keys) |
+| CW001 | critical | API keys and tokens written in clear (Anthropic, OpenAI, GitHub, AWS, Google, Hugging Face, Slack, Stripe, private keys); documentation examples (`…EXAMPLE`, `sk-xxxx`, truncated keys) are ignored |
 | CW100 | medium | MCP config that cannot be parsed (some clients still run the servers they can read from a broken file) |
-| CW101 | high | Shell running a script (`bash -c`, `pwsh -Command`), `cmd /c` with a command line or special characters, inline code (`node -e`, `python -c`) |
-| CW102 | medium | `npx` / `uvx` package without an exact version (`^1.0`, `@beta`, `>=1` are not pinned) |
-| CW103 | high | Secret written literally in an MCP server's `env` or `headers`, including passwords inside URLs |
+| CW101 | high | Shell running a script (`bash -c`, `pwsh -Command`, `su -c`), `cmd /c` or WSL with a command line or special characters, `npx -c`, a command line with shell operators in `command`, inline code (`node -e`, `python -c`) |
+| CW102 | medium | Registry package without an exact version (`^1.0`, `@beta`, `>=1` are not pinned), whatever the launcher: `npx`, `uvx`, `pnpm dlx`, `yarn dlx`, `bun x`, `npm exec`, `uv tool run`, `pipx run`, `deno run npm:` |
+| CW103 | high | Secret written literally in an MCP server's `env`, `headers`, command line (`--api-key …`, `-e TOKEN=…`) or URL (password, `?token=…`); placeholders, references and plain settings are ignored |
 | CW104 | high | Filesystem server exposed to `/`, a whole drive or a whole home directory |
 | CW105 | high | Remote MCP server reached over plain `http://` |
 | CW106 | high | Docker/Podman server with `--privileged`, host namespaces, or mounts of `/`, the home directory, `.ssh`/`.aws`… or the Docker socket |
-| CW107 | high | Package installed from git, a URL or a GitHub shorthand instead of the npm / PyPI registry |
+| CW107 | high | Package or script installed from git, a URL or a GitHub shorthand instead of the npm / PyPI registry (`uv run --with git+…`, `deno run https://…`…) |
 | CW108 | medium | Tools auto-approved (`alwaysAllow`, `autoApprove`, `trust: true`): no human confirmation |
 | CW109 | high | AI client set to approve everything: Claude Code `enableAllProjectMcpServers` or `bypassPermissions`, VS Code `chat.tools.global.autoApprove`, Zed, Cursor `*:*`, Kiro Autopilot |
+| CW110 | high | TLS certificate checks turned off: `NODE_TLS_REJECT_UNAUTHORIZED=0`, `*_SSL_VERIFY=false`, `--insecure`, `--strict-ssl=false`, `--allow-insecure-host` |
 
 Run `configwarden rules` to list them from the CLI.
 
@@ -79,7 +80,7 @@ configwarden reads every `.json` / `.jsonc` file (comments and trailing commas a
 
 Other JSON files are only reported when they contain MCP servers. YAML (Continue) and TOML (Codex CLI) configurations are not supported yet.
 
-Wrapped commands are unwrapped before being checked: `cmd /c npx …`, `wsl …`, `env VAR=1 …`, `sudo …` and `bash -c "…"` are all analysed for the program they really start.
+Wrapped commands are unwrapped before being checked: `cmd /c npx …`, `wsl …`, `env VAR=1 …` (and `env -S`), `sudo …`, `uv run …`, `pnpm exec …` and `bash -c "…"` are all analysed for the program they really start.
 
 ## Usage
 

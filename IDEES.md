@@ -38,7 +38,6 @@ Le parking à idées. Une idée qui ne sert pas la phrase du projet atterrit ici
 ## Angles morts relevés par la revue indépendante (7 octobre 2026)
 - **PowerShell encodé** : décoder `-EncodedCommand` (base64 UTF-16) pour analyser la commande
   cachée, au lieu de seulement la signaler.
-- **`env -S "…"`** : découper la chaîne passée à `env -S` comme un script.
 
 ## Recherche des Éclaireurs (8 octobre 2026)
 - **TOML et YAML** (décision du 8 octobre : plus tard) : Codex CLI (`config.toml`,
@@ -52,6 +51,25 @@ Le parking à idées. Une idée qui ne sert pas la phrase du projet atterrit ici
   (`server.mcp_config`).
 - **Agents** : serveurs déclarés dans l'en-tête YAML des agents Claude Code
   (`.claude/agents/*.md`) et Kiro (`.kiro/agents/*.md`).
+
+## Grand test sur 3 099 exemples publiés et contre-vérification (8 octobre 2026)
+- **Image Docker non figée** (règle à créer) : 110 exemples Docker sur 112 lancent une image
+  sans étiquette ni empreinte (`image` ou `image:latest`), l'équivalent de CW102 pour Docker.
+- **Toutes les commandes d'un script** : seule la 1re commande de `bash -c "cd x && npx …"` est
+  vérifiée (CW101 signale déjà le script ; 4 exemples cachent un `npx` non figé plus loin).
+- **CW102 pour `--with`** : les paquets ajoutés par `uvx --with` / `uv run --with` ne sont
+  vérifiés que pour leur source (CW107), pas pour leur version.
+- **CW108 et outils en lecture seule** : 9 listes `alwaysAllow` sur 12 ne contiennent que des
+  outils de lecture, que la règle tolère ; distinguer lecture et écriture (gravité basse ?).
+- **CW105 dans les arguments** : `npx mcp-remote http://hôte-distant/sse` n'est pas signalé
+  (seules les clés `url` le sont).
+- **Fichiers `.code-workspace`** (VS Code) : réglages sous `"settings"` ; vérifier si VS Code
+  y lit des serveurs MCP et `chat.tools.autoApprove`.
+- **Valeurs de CW109 sans tenir compte de la casse** (`BypassPermissions`) : seulement si
+  l'outil concerné les accepte ainsi.
+- **`npm init` / `pnpm create`** : téléchargent et lancent un paquet, rares pour MCP.
+- **Restes « bas » de l'Auditeur** : `--session dev01` encore pris pour un secret ;
+  `${env:A}littéral${env:B}` lu comme une référence (motif `.+` trop gourmand, antérieur à 0.3.0).
 
 ## Nouvelles idées
 -

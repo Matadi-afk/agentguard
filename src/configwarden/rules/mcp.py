@@ -25,9 +25,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import PurePosixPath
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
-from configwarden import commands, jsonc
+from configwarden import commands, jsonc, values
 from configwarden.models import Finding, Rule, Severity
 from configwarden.redact import redact, redact_url, url_origin
 
@@ -132,6 +132,20 @@ CLIENT_AUTO_APPROVE = Rule(
     ),
 )
 
+# CW110 : vérification des certificats TLS désactivée (NODE_TLS_REJECT_UNAUTHORIZED=0,
+# --insecure…). Relevé par le grand test du 8 octobre 2026, où ce réglage n'était
+# signalé que comme un « secret » (CW103), pour une mauvaise raison.
+INSECURE_TLS = Rule(
+    id="CW110",
+    title="TLS certificate checks disabled",
+    severity=Severity.HIGH,
+    remediation=(
+        "Remove the setting that turns off certificate verification. Without it, anyone on "
+        "the network path can impersonate the server or the package registry, and read or "
+        "change the traffic, tokens included."
+    ),
+)
+
 RULES = [
     INVALID_CONFIG,
     SHELL_EXECUTION,
@@ -143,6 +157,7 @@ RULES = [
     UNTRUSTED_PACKAGE_SOURCE,
     AUTO_APPROVED_TOOLS,
     CLIENT_AUTO_APPROVE,
+    INSECURE_TLS,
 ]
 
 # --- Constantes de détection ---------------------------------------------------
@@ -185,11 +200,19 @@ _MCP_MARKERS = ('"mcpServers"', '"context_servers"', '"mcp"')
 _UNICODE_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
 # Clés qui désignent l'adresse d'un serveur distant, selon l'outil.
 _URL_KEYS = ("url", "serverUrl", "httpUrl")
-_PACKAGE_RUNNERS = {"npx", "pnpx", "bunx", "uvx"}
+# Lanceurs de paquets ; « pnpm dlx », « bun x », « uv tool run »… y sont ramenés par
+# commands.analyse(). « pipx run » garde son nom : ses options lui sont propres.
+_PACKAGE_RUNNERS = {"npx", "pnpx", "bunx", "uvx", "pipx run"}
+_PYTHON_RUNNERS = {"uvx", "pipx run"}
 # Options dont la valeur désigne le paquet lancé (« -p » est --package pour npx,
 # mais --python pour uvx).
 _NPM_PACKAGE_FLAGS = {"--package", "-p"}
 _UV_PACKAGE_FLAGS = {"--from"}
+_PIPX_PACKAGE_FLAGS = {"--spec"}
+_PIPX_OPTIONS_WITH_VALUE = {"--spec", "--python", "--index-url", "-i", "--pip-args", "--backend"}
+# Chemin local (« ./serveur », « /opt/srv », « C:\\srv », « file:… ») : rien n'est
+# téléchargé depuis un registre, il n'y a donc pas de version à figer.
+_LOCAL_PATH = re.compile(r"\.{1,2}(?:[\\/]|$)|~[\\/]|/|[A-Za-z]:[\\/]|file:", re.IGNORECASE)
 # uvx : paquets installés EN PLUS du serveur (leur code s'exécute aussi).
 _EXTRA_PACKAGE_FLAGS = {"--with", "--with-editable"}
 # Options suivies d'une valeur, PAR LANCEUR : « -f » vaut --force (sans valeur)
@@ -233,11 +256,98 @@ _UV_OPTIONS_WITH_VALUE = {
     "--index-strategy",
     "--keyring-provider",
     "--python-preference",
+    # Relevé complet des options d'uvx (« uv tool run ») suivies d'une valeur, oct. 2026.
+    "-c",
+    "-b",
+    "--build-constraints",
+    "-i",
+    "-C",
+    "--config-setting",
+    "--config-settings-package",
+    "-P",
+    "--upgrade-package",
+    "--reinstall-package",
+    "--refresh-package",
+    "--no-build-package",
+    "--no-binary-package",
+    "--only-binary-package",
+    "--no-build-isolation-package",
+    "--resolution",
+    "--prerelease",
+    "--fork-strategy",
+    "--link-mode",
+    "--env-file",
+    "--color",
+    "--allow-insecure-host",
+    "--exclude-newer-package",
+    "--torch-backend",
+    "--python-platform",
 }
-# « PAT » (Personal Access Token) seulement comme mot entier : sinon PATH, PATTERN…
-# seraient pris pour des secrets. « PASS » couvre PASSWORD, PASSWD, DB_PASS…
+# Clés qui annoncent un secret. Elles sont d'abord normalisées (« apiKey », « api-key »
+# -> « API_KEY »), puis lues mot par mot : KEY, AUTH ou SESSION doivent être des mots
+# entiers (KEYCLOAK, TOKENIZER, OAUTH ne sont pas des secrets) ; PASSWORD, SECRET,
+# TOKEN… peuvent finir un mot collé (« MYSQLPASSWORD », « GHTOKEN »).
+_GLUED_SENSITIVE_WORDS = (
+    r"[A-Z0-9]{0,40}(?:PASSWORD|PASSWD|PASSPHRASE|SECRETS?|TOKENS?|APIKEY|ACCESSKEY"
+    r"|SECRETKEY|PRIVATEKEY)"
+)
 _SENSITIVE_KEY = re.compile(
-    r"KEY|TOKEN|SECRET|PASS|(?<![A-Z])PAT(?![A-Z])|AUTH|CREDENTIAL", re.IGNORECASE
+    rf"(?:^|_)(?:{_GLUED_SENSITIVE_WORDS}|KEYS?|PASS|PWD|PAT|AUTH|AUTHORIZATION|CREDENTIALS?|SESSION"
+    r"|COOKIES?|BEARER)(?:_|$)"
+)
+# Sous ces clés, même un mot ou un nombre peut être le secret (« postgres », « 123456 »).
+_PASSWORD_KEY = re.compile(
+    r"(?:^|_)(?:[A-Z0-9]{0,40}(?:PASSWORD|PASSWD|PASSPHRASE|SECRETS?)|PASS|PWD)(?:_|$)"
+)
+# Clés qui contiennent un mot sensible sans désigner un secret : un réglage, une
+# adresse, un identifiant public… (MAX_TOKENS, TOKEN_URL, CLIENT_ID, SORT_KEY…).
+# Mesuré le 8 octobre 2026 sur 3 099 exemples publiés, puis revue de l'Auditeur.
+_NON_SECRET_KEY = re.compile(
+    r"(?:^|_)(?:MAX|MIN|NUM)_"
+    r"|(?:^|_)(?:SORT|PRIMARY|FOREIGN|PARTITION|ROUTING|LOOKUP|INDEX|CACHE)_KEYS?(?:_|$)"
+    r"|_(?:PORT|TIMEOUT|TTL|LIMIT|SIZE|COUNT|LENGTH|URL|URI|ENDPOINT|HOST|DOMAIN|PATH|FILE|DIR"
+    r"|NAME|USER|USERNAME|EMAIL|REGION|SCOPES?|ISSUER|AUDIENCE|ALGORITHM|TYPE|METHOD|MODE"
+    r"|PROVIDER|VERSION|EXPIRY|EXPIRES(?:_IN)?|ENABLED|DISABLED|MINT|ADDRESS|LOCATION"
+    r"|COMMAND|CMD|PREFIX|STRATEGY|REALM|MODEL"
+    r"|(?:CLIENT|APP|TENANT|PROJECT|ACCOUNT|ORG|USER)_ID)$"
+)
+# Clés qui annoncent un chemin de fichier (le contenu, lui, n'est pas dans la valeur).
+_PATH_KEY = re.compile(r"PATH|FILE|DIR|FOLDER|CREDENTIALS|LOCATION|KEYSTORE|CERT|PEM|P12|PFX")
+# Paramètre d'URL signé (Azure SAS « sig= », AWS « X-Amz-Signature= ») : un secret.
+_SIGNATURE_KEY = re.compile(r"(?:^|_)SIG(?:NATURE)?$")
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_KEY_SEPARATORS = re.compile(r"[-.\s]+")
+_SCHEME_PREFIX = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,31}://")
+# Ligne de commande : options qui passent un en-tête HTTP ou une variable d'environnement.
+_HEADER_OPTIONS = {"-H", "--header", "--headers"}
+_ENV_OPTIONS = {"-e", "--env", "--set-env", "--environment"}
+_OPTION = re.compile(r"--?([A-Za-z][A-Za-z0-9_.-]{0,63})(?:=(.*))?", re.DOTALL)
+_ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_.-]{0,127})=(.*)", re.DOTALL)
+_MAX_QUERY_PARAMETERS = 100
+_MAX_EMBEDDED_JSON = 65_536
+
+# CW110 : réglages qui coupent la vérification des certificats TLS.
+_TRUE = {"1", "true", "yes", "on", "y"}
+_FALSE = {"0", "false", "no", "off", "n"}
+# Variables connues dont la valeur « 0 » coupe la vérification.
+_TLS_OFF_WHEN_ZERO = {"NODE_TLS_REJECT_UNAUTHORIZED", "PYTHONHTTPSVERIFY"}
+# Hôtes acceptés sans vérification (uv, pip) : toute valeur compte.
+_TLS_INSECURE_HOSTS = {
+    "UV_INSECURE_HOST",
+    "PIP_TRUSTED_HOST",
+    "ALLOW_INSECURE_HOST",
+    "TRUSTED_HOST",
+}
+# « …_SSL_VERIFY=false », « VERIFY_SSL=false », « --strict-ssl=false »
+_TLS_VERIFY_NAME = re.compile(
+    r"(?:^|_)(?:(?:SSL|TLS|CERTS?)_?VERIF(?:Y|ICATION)|VERIFY_?(?:SSL|TLS|CERTS?)"
+    r"|(?:SSL|TLS)_?(?:CHECK|VALIDATION)|STRICT_?SSL|CHECK_?CERTIFICATES?)$"
+)
+# « …_INSECURE=true », « GIT_SSL_NO_VERIFY=true », « --insecure-skip-tls-verify »
+_TLS_SKIP_NAME = re.compile(
+    r"(?:^|_)(?:INSECURE|(?:SKIP|NO|DISABLE|IGNORE)_?(?:SSL|TLS|CERT(?:IFICATE)?S?)"
+    r"(?:_?(?:VERIFY|VERIFICATION|CHECKS?|ERRORS))?|(?:SSL|TLS)_?(?:NO|SKIP)_?VERIFY"
+    r"|INSECURE_?SKIP_?TLS_?VERIFY|TLS_?INSECURE)$"
 )
 # CW103 : références à une variable (pas un secret) selon les outils :
 # $VAR, ${VAR}, ${env:VAR}, ${input:id}, %VAR% (Windows), $env:VAR (PowerShell),
@@ -251,16 +361,16 @@ _ENV_REFERENCE = re.compile(
 )
 # ${VAR:-défaut} : la valeur par défaut, elle, peut être un vrai secret écrit en clair.
 _DEFAULTED_REFERENCE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=](.*)\}", re.DOTALL)
-# Modèles à remplir des documentations : <YOUR_KEY>, your-api-key-here, xxxx…
-_PLACEHOLDER = re.compile(
-    r"<[^<>]*>|\[[^\[\]]*\]|x{3,}|\*{3,}|\.{3,}|changeme|change-me|replace[-_ ]?me"
-    r"|placeholder|todo|tbd|your[-_ ][a-z0-9_ -]+",
-    re.IGNORECASE,
-)
+# Les modèles à remplir des documentations (<YOUR_KEY>, sk-..., xxxx…) sont reconnus
+# par values.is_placeholder().
 # Mot de passe dans une URL (postgres://user:motdepasse@hôte). Quantités bornées et
 # début de mot obligatoire : temps linéaire même sur un texte piégé.
 _URL_PASSWORD = re.compile(
     r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}://[^/@\s:]{0,256}:([^@\s/]{1,512})@"
+)
+# Jeton utilisé comme nom d'utilisateur : https://ghp_…@github.com/… (long, avec un chiffre).
+_URL_USER_TOKEN = re.compile(
+    r"[A-Za-z][A-Za-z0-9+.-]{0,31}://((?=[A-Za-z0-9_-]{0,255}\d)[A-Za-z0-9_-]{20,256})@"
 )
 # CW104 / CW106 : dossiers trop larges (racine, lecteur, dossier personnel entier).
 _BROAD_PATH = re.compile(
@@ -526,7 +636,7 @@ def _normalize_server(server: dict) -> dict:
 
 def _package_is_pinned(runner: str, package: str) -> bool:
     """Version EXACTE ? « ^1.0.0 », « ~1.2 », « 1 », « beta », « >=1 » ne le sont pas."""
-    if runner == "uvx":
+    if runner in _PYTHON_RUNNERS:
         return bool(_UV_EXACT_VERSION.fullmatch(package))
     # npm : "@scope/pkg@1.2.3" -> on ignore le "@" initial du scope.
     name_and_version = package[1:] if package.startswith("@") else package
@@ -551,7 +661,7 @@ def _literal_secret(value: str) -> str | None:
         candidate = defaulted.group(1).strip()
         if not candidate:
             return None
-    if not candidate or _ENV_REFERENCE.fullmatch(candidate) or _PLACEHOLDER.fullmatch(candidate):
+    if not candidate or _ENV_REFERENCE.fullmatch(candidate) or values.is_placeholder(candidate):
         return None
     return candidate
 
@@ -559,6 +669,197 @@ def _literal_secret(value: str) -> str | None:
 def _has_url_password(value: str) -> bool:
     match = _URL_PASSWORD.search(value)
     return match is not None and _literal_secret(match.group(1)) is not None
+
+
+def _normalize_key(key: str) -> str:
+    """« apiKey », « api-key », « X-Api-Key » -> « API_KEY », « X_API_KEY »."""
+    return _KEY_SEPARATORS.sub("_", _CAMEL_BOUNDARY.sub("_", key.strip())).upper()
+
+
+def _is_sensitive_name(key: str) -> bool:
+    normalized = _normalize_key(key)
+    return bool(_SENSITIVE_KEY.search(normalized)) and not _NON_SECRET_KEY.search(normalized)
+
+
+def _secret_value(key: str, value: str, *, sensitive: bool = False) -> str | None:
+    """La valeur littérale si le couple (clé, valeur) a l'air d'un secret écrit en clair.
+
+    Ne sont PAS des secrets : une référence (${TOKEN}), un modèle à remplir, un booléen,
+    un nombre court ou un mot (sauf sous une clé de mot de passe : « postgres »), un
+    chemin de fichier, une adresse web (ses identifiants sont vérifiés à part).
+    `sensitive` : la clé est déjà connue comme sensible (paramètre « sig » d'une URL).
+    """
+    normalized = _normalize_key(key)
+    if not sensitive and (
+        not _SENSITIVE_KEY.search(normalized) or _NON_SECRET_KEY.search(normalized)
+    ):
+        return None
+    literal = _literal_secret(value)
+    if literal is None or values.is_boolean(literal):
+        return None
+    password_like = bool(_PASSWORD_KEY.search(normalized))
+    if not password_like and (values.is_number(literal) or values.is_word(literal)):
+        return None
+    if values.is_file_path(literal, path_hint=bool(_PATH_KEY.search(normalized))):
+        return None
+    if _SCHEME_PREFIX.match(literal):
+        return None
+    return literal
+
+
+def _url_secret(url: str) -> str | None:
+    """Ce qui rend une URL secrète : « an embedded password », « a secret 'token' parameter »."""
+    url = url.strip()
+    # Mot de passe : cherché partout (« jdbc:postgresql://user:pass@hôte » compris).
+    if _has_url_password(url):
+        return "an embedded password"
+    if not _SCHEME_PREFIX.match(url):
+        return None
+    user_token = _URL_USER_TOKEN.match(url)
+    if user_token and _secret_value("TOKEN", user_token.group(1)) is not None:
+        return "an embedded token"  # https://ghp_…@github.com/…
+    _, question_mark, query = url.partition("?")
+    if not question_mark:
+        return None
+    for pair in query.split("#", 1)[0].split("&")[:_MAX_QUERY_PARAMETERS]:
+        name, equals, value = pair.partition("=")
+        if not equals:
+            continue
+        name, value = unquote(name), unquote(value)
+        signed = bool(_SIGNATURE_KEY.search(_normalize_key(name)))
+        if _secret_value(name, value, sensitive=signed) is not None:
+            return f"a secret '{commands.shorten(name)}' parameter"
+    return None
+
+
+def _embedded_secrets(value: str) -> list[str]:
+    """Clés secrètes d'un objet JSON écrit dans une valeur (« {"Authorization": "Bearer …"} »)."""
+    text = value.strip()
+    if not (text.startswith("{") and text.endswith("}")) or len(text) > _MAX_EMBEDDED_JSON:
+        return []
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    return [
+        str(key)
+        for key, item in data.items()
+        if isinstance(item, str) and _secret_value(str(key), item) is not None
+    ]
+
+
+def _option_secret(flag: str, name: str, value: str) -> str | None:
+    """Description (sans la valeur) d'un secret passé par une option, sinon None."""
+    if flag in _HEADER_OPTIONS:
+        header, colon, header_value = value.partition(":")
+        if colon and _secret_value(header.strip(), header_value.strip()) is not None:
+            return f"{flag} '{commands.shorten(header.strip())}: ****'"
+        return None
+    if flag in _ENV_OPTIONS:
+        assignment = _ASSIGNMENT.fullmatch(value)
+        if assignment and _secret_value(assignment.group(1), assignment.group(2)) is not None:
+            return f"{flag} {commands.shorten(assignment.group(1))}=****"
+        return None
+    if _secret_value(name, value) is not None:
+        return f"{commands.shorten(flag)} ****"
+    return None
+
+
+def _is_option_value(word: str) -> bool:
+    """Le mot suivant est-il la valeur de l'option ? Un secret peut commencer par « - »
+    (environ 3 % des jetons base64url), une option courte (« -v ») ou longue, non."""
+    return not word.startswith("-") or (not word.startswith("--") and len(word) >= 16)
+
+
+def _command_line_secrets(words: list[str]) -> list[str]:
+    """Secrets écrits sur la ligne de commande : « --api-key valeur », « -e TOKEN=valeur »…
+
+    Une ligne de commande se lit aussi dans la liste des processus (`ps`) : un secret
+    n'y a pas sa place. Seules les options aux noms sensibles sont examinées.
+    """
+    found: list[str] = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        option = _OPTION.fullmatch(word)
+        if option:
+            flag = word.split("=", 1)[0]
+            name, attached = option.group(1), option.group(2)
+            if flag in _HEADER_OPTIONS or flag in _ENV_OPTIONS or _is_sensitive_name(name):
+                following = words[index + 1] if index + 1 < len(words) else None
+                if attached is not None:
+                    value, used = attached, 1
+                elif following is not None and _is_option_value(following):
+                    value, used = following, 2
+                else:
+                    index += 1
+                    continue
+                description = _option_secret(flag, name, value)
+                if description:
+                    found.append(description)
+                index += used
+                continue
+        else:
+            assignment = _ASSIGNMENT.fullmatch(word)
+            if assignment and _secret_value(assignment.group(1), assignment.group(2)) is not None:
+                found.append(f"{commands.shorten(assignment.group(1))}=****")
+        index += 1
+    return found
+
+
+def _command_line_urls(words: list[str]) -> list[tuple[str, str]]:
+    """(URL, ce qui la rend secrète) pour chaque URL de la ligne de commande."""
+    found: list[tuple[str, str]] = []
+    for word in words:
+        candidate = word.split("=", 1)[1] if word.startswith("-") and "=" in word else word
+        where = _url_secret(candidate)
+        if where:
+            found.append((candidate, where))
+    return found
+
+
+def _tls_disabled_by_env(key: str, value: str) -> bool:
+    """Variable d'environnement qui coupe la vérification des certificats TLS."""
+    name = _normalize_key(key)
+    setting = value.strip().lower()
+    if name in _TLS_OFF_WHEN_ZERO:
+        return setting == "0"
+    if name in _TLS_INSECURE_HOSTS:
+        return bool(setting)
+    if _TLS_SKIP_NAME.search(name):
+        return setting in _TRUE  # MCP_INSECURE=1, GIT_SSL_NO_VERIFY=true
+    if _TLS_VERIFY_NAME.search(name):
+        return setting in _FALSE  # SSL_VERIFY=false, NPM_CONFIG_STRICT_SSL=false
+    return False
+
+
+def _tls_disabled_by_options(words: list[str]) -> list[str]:
+    """Options qui coupent la vérification TLS : --insecure, --strict-ssl=false…"""
+    found: list[str] = []
+    for index, word in enumerate(words):
+        if not word.startswith("--"):
+            continue
+        flag, equals, value = word.partition("=")
+        name = _normalize_key(flag[2:])
+        negated = name.startswith("NO_")
+        base = name[3:] if negated else name
+        setting = value.strip().lower()
+        if base in _TLS_INSECURE_HOSTS:
+            if not negated:
+                found.append(commands.shorten(flag))  # --allow-insecure-host, --trusted-host
+        elif negated and _TLS_SKIP_NAME.search(base):
+            continue  # --no-insecure : l'inverse, donc sûr
+        elif _TLS_SKIP_NAME.search(name):
+            if not equals or setting in _TRUE:
+                found.append(commands.shorten(flag))  # --insecure, --skip-tls-verify
+        elif _TLS_VERIFY_NAME.search(base):
+            # --no-strict-ssl ; --strict-ssl=false ; --verify-ssl false
+            following = words[index + 1] if index + 1 < len(words) else ""
+            if negated or (setting if equals else following.strip().lower()) in _FALSE:
+                found.append(commands.shorten(flag))
+    return found
 
 
 def _option_values(args: list[str], flags: set[str]) -> list[str]:
@@ -629,11 +930,19 @@ def _container_issues(args: list[str]) -> list[str]:
 
 
 def _package_flags(runner: str) -> set[str]:
+    if runner == "pipx run":
+        return _PIPX_PACKAGE_FLAGS
     return _UV_PACKAGE_FLAGS if runner == "uvx" else _NPM_PACKAGE_FLAGS
 
 
 def _options_with_value(runner: str) -> set[str]:
+    if runner == "pipx run":
+        return _PIPX_OPTIONS_WITH_VALUE
     return _UV_OPTIONS_WITH_VALUE if runner == "uvx" else _NPM_OPTIONS_WITH_VALUE
+
+
+def _is_local_path(package: str) -> bool:
+    return bool(_LOCAL_PATH.match(package.strip()))
 
 
 def _first_positional(runner: str, args: list[str]) -> str | None:
@@ -685,7 +994,7 @@ def _source_outside_registry(runner: str, value: str) -> str | None:
     if scp and scp.group(1).lower() != "npm":  # « alias@npm:paquet » reste le registre
         return value.split("@", 1)[1]  # sans la partie « utilisateur@ »
     is_archive = value.lower().endswith((".tgz", ".tar.gz", ".tar"))
-    if runner != "uvx" and _GITHUB_SHORTHAND.fullmatch(value) and not is_archive:
+    if runner not in _PYTHON_RUNNERS and _GITHUB_SHORTHAND.fullmatch(value) and not is_archive:
         return value
     return None
 
@@ -709,18 +1018,35 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
     raw_args = server.get("args")
     args = [a for a in raw_args if isinstance(a, str)] if isinstance(raw_args, list) else []
 
+    reported: set[tuple[str, str]] = set()
+
     def add(rule: Rule, message: str) -> None:
+        # Une seule fois par message : 70 000 « --insecure » ne font pas 70 000 alertes.
+        if (rule.id, message) in reported:
+            return
+        reported.add((rule.id, message))
         findings.append(Finding(rule=rule, path=path, line=line, message=message))
 
     if isinstance(command, str) and command.strip():
-        # Les enveloppes (cmd /c, wsl, env, sudo, bash -c…) sont retirées : on vérifie
-        # le programme vraiment lancé, et on relève au passage les risques CW101.
+        # Les enveloppes (cmd /c, wsl, env, sudo, uv run, bash -c…) sont retirées : on
+        # vérifie le programme vraiment lancé, et on relève au passage les risques CW101.
         launch = commands.analyse(command, args)
         exe, args = launch.executable, launch.args
 
         # CW101 : shell, ligne de commande ou code en ligne (une seule alerte par serveur)
         if launch.risks:
             add(SHELL_EXECUTION, f"Server '{name}' {launch.risks[0]}.")
+
+        # CW107 : paquets ajoutés par l'enveloppe (« uv run --with git+https://… »)
+        for extra in launch.sources:
+            extra_source = _source_outside_registry("uvx", extra)
+            if extra_source:
+                add(
+                    UNTRUSTED_PACKAGE_SOURCE,
+                    f"Server '{name}' installs its code from '{url_origin(extra_source)}' "
+                    "instead of a registry.",
+                )
+                break
 
         if exe in _PACKAGE_RUNNERS:
             # CW107 : paquet hors registre (git, URL…). Plus grave qu'CW102, qu'on ne
@@ -735,13 +1061,30 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
                     "instead of a registry.",
                 )
             else:
-                # CW102 : paquet non figé
+                # CW102 : paquet non figé (un chemin local n'a pas de version à figer)
                 package = _package_spec(exe, args)
-                if package and not _package_is_pinned(exe, package):
+                if package and not _is_local_path(package) and not _package_is_pinned(exe, package):
                     add(
                         UNPINNED_PACKAGE,
                         f"Server '{name}' runs '{redact_url(package)}' without a pinned version.",
                     )
+
+        # CW103 : secrets passés sur la ligne de commande (visibles aussi dans `ps`)
+        for description in _command_line_secrets(launch.words):
+            add(
+                HARDCODED_ENV_SECRET,
+                f"Server '{name}' passes a secret on its command line ({description}).",
+            )
+        for url, where in _command_line_urls(launch.words):
+            add(
+                HARDCODED_ENV_SECRET,
+                f"Server '{name}' passes a URL with {where} on its command line "
+                f"({url_origin(url)}).",
+            )
+
+        # CW110 : vérification TLS coupée par une option (--insecure, --strict-ssl=false…)
+        for flag in _tls_disabled_by_options(launch.words):
+            add(INSECURE_TLS, f"Server '{name}' turns off TLS certificate checks ({flag}).")
 
         # CW106 : conteneur qui casse son isolation
         if exe in _CONTAINER_ENGINES:
@@ -754,26 +1097,43 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
                 if _is_broad_path(arg):
                     add(BROAD_FILESYSTEM, f"Server '{name}' exposes '{arg}' to the AI agent.")
 
-    # CW103 : secrets en dur dans env / headers
+    # CW103 : secrets en dur dans env / headers ; CW110 : vérification TLS coupée (env)
     for block_name in ("env", "headers"):
         block = server.get(block_name)
         if not isinstance(block, dict):
             continue
-        for key, value in block.items():
+        for raw_key, value in block.items():
             if not isinstance(value, str) or not value.strip():
                 continue
-            # Mot de passe dans une URL (DATABASE_URL…), quel que soit le nom de la clé.
-            if _has_url_password(value):
+            key = str(raw_key)
+            if block_name == "env" and _tls_disabled_by_env(key, value):
                 add(
-                    HARDCODED_ENV_SECRET,
-                    f"Server '{name}' sets {block_name}.{key} to a URL with an embedded "
-                    f"password ({url_origin(value)}).",
+                    INSECURE_TLS,
+                    f"Server '{name}' turns off TLS certificate checks (env.{key}).",
                 )
                 continue
-            if not _SENSITIVE_KEY.search(str(key)):
+            # Mot de passe ou paramètre secret dans une URL (DATABASE_URL…), quel que
+            # soit le nom de la clé.
+            where = _url_secret(value)
+            if where:
+                add(
+                    HARDCODED_ENV_SECRET,
+                    f"Server '{name}' sets {block_name}.{key} to a URL with {where} "
+                    f"({url_origin(value)}).",
+                )
                 continue
-            # Références (${TOKEN}, %TOKEN%…), modèles (<YOUR_KEY>) : pas des secrets.
-            if _literal_secret(value) is None:
+            # En-têtes HTTP écrits en JSON dans une seule variable (« MCP_HEADERS »).
+            embedded = _embedded_secrets(value)
+            if embedded:
+                add(
+                    HARDCODED_ENV_SECRET,
+                    f"Server '{name}' sets {block_name}.{key} to JSON with a literal "
+                    f"'{commands.shorten(embedded[0])}' value.",
+                )
+                continue
+            # Références (${TOKEN}), modèles (<YOUR_KEY>), réglages (MAX_TOKENS=4096),
+            # chemins de fichiers : pas des secrets.
+            if _secret_value(key, value) is None:
                 continue
             add(
                 HARDCODED_ENV_SECRET,
@@ -781,11 +1141,18 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
             )
 
     # CW105 : serveur distant en HTTP non chiffré (« url », « serverUrl » ou « httpUrl »)
+    # CW103 : identifiants ou paramètre secret écrits dans cette adresse
     reported_hosts: set[str] = set()
     for url_key in _URL_KEYS:
         url = server.get(url_key)
         if not isinstance(url, str):
             continue
+        where = _url_secret(url)
+        if where:
+            add(
+                HARDCODED_ENV_SECRET,
+                f"Server '{name}' connects to a URL with {where} ({url_origin(url)}).",
+            )
         host = _http_host(url)
         if host is not None and host not in _LOCAL_HOSTS and host not in reported_hosts:
             reported_hosts.add(host)

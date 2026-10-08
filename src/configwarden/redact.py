@@ -29,6 +29,14 @@ _SHORTHAND = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]{0,31}:(?!//)")
 _URL = re.compile(
     r"(?<![A-Za-z0-9+.\-])(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]{0,31}://)(?P<rest>[^\s'\"]*)"
 )
+# Hôte d'une URL (nom, IPv4 ou [IPv6]) et port facultatif. Longueurs bornées.
+_PORT = r"(?::\d{1,5})?"
+_HOST = re.compile(r"(?:[A-Za-z0-9._~-]{1,253}|\[[0-9A-Fa-f:.]{2,45}\])" + _PORT)
+# Forme d'un VRAI nom d'hôte (« github.com », « localhost ») ou d'une adresse IP.
+_NAMED_HOST = re.compile(
+    r"(?:(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.){1,126}[A-Za-z]{2,63}"
+    r"|localhost|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9A-Fa-f:.]{2,45}\])" + _PORT
+)
 
 # Catégories Unicode dangereuses à l'affichage :
 #   Cc      contrôles (\n, \x1b, DEL…) : nouvelles lignes, codes ANSI ;
@@ -112,18 +120,34 @@ def url_origin(value: str) -> str:
 
     >>> url_origin("https://jane:p4ss w0rd@npm.example/T0KEN/pkg.tgz?x=1")
     'https://npm.example/…'
+    >>> url_origin("git+https://github.com/o/r.git@main")
+    'git+https://github.com/…'
 
     Le plus sûr pour un message : ni identifiants, ni chemin (certains registres
     privés y placent un jeton), ni paramètres. Un texte qui n'est pas une URL
     (« github:auteur/projet ») est renvoyé après redact_url().
+
+    L'hôte est celui que lisent git, curl et les navigateurs : ce qui suit le dernier
+    « @ » AVANT le premier « / ». Sinon « https://evil.example/x@github.com » afficherait
+    github.com, un hôte de confiance, alors que le code vient d'evil.example. En cas de
+    doute, on n'affiche pas d'hôte du tout (« https://… ») :
+    - « \\ » avant le premier « / » : les outils ne le lisent pas tous pareil ;
+    - un « @ » plus loin (référence git « @main », ou mot de passe mal encodé qui
+      contient « / ») : l'hôte n'est affiché que s'il a la forme d'un vrai nom
+      (« github.com », une adresse IP), jamais celle d'un morceau de mot de passe.
     """
     value = value.strip()
     scheme = _SCHEME.match(value)
     if scheme:
-        # Le DERNIER « @ » de toute la suite : un mot de passe mal encodé peut contenir
-        # « ? », « # » ou « / ». Au pire, on affiche un mauvais hôte, jamais le secret.
-        after_credentials = value[scheme.end() :].rpartition("@")[2]
-        host = re.split(r"[/?#\\\s]", after_credentials, maxsplit=1)[0]
+        rest = value[scheme.end() :]
+        authority = re.split(r"[/?#]", rest, maxsplit=1)[0]
+        after = rest[len(authority) :]
+        host = authority.rpartition("@")[2]
+        ambiguous = "@" in after
+        if "\\" in authority or not _HOST.fullmatch(host):
+            return f"{scheme.group(0)}…"
+        if ambiguous and not _NAMED_HOST.fullmatch(host):
+            return f"{scheme.group(0)}…"
         return f"{scheme.group(0)}{host}/…"
     shorthand = _SHORTHAND.match(value)
     if shorthand:

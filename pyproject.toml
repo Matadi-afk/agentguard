@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "configwarden"
-version = "0.2.2"
+version = "0.3.0"
 description = "Security scanner for AI agent configurations (MCP servers, secrets, supply chain)."
 readme = "README.md"
 license = "Apache-2.0"

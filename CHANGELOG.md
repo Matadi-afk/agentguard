@@ -5,6 +5,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
+### Security
+Detection gaps found by an independent review of this release before publication, then re-checked by a second pass. A configuration crafted to evade configwarden could start a shell or an unverified package without any finding. No user report, no known exploitation.
+- **Other package launchers were not checked**: `pnpm dlx`, `yarn dlx`, `bun x`, `npm exec`, `uv tool run` and `pipx run` download and run a package exactly like `npx` or `uvx`, but CW101, CW102 and CW107 skipped them. `uv run`, `pnpm exec`, `yarn exec`, `poetry run`, `pipenv run`, `pdm run`, `hatch run` and `conda run` are now unwrapped, and packages added with `uv run --with` are checked by CW107.
+- **`env -S "…"` hid the real command** (`env -S "bash -c …"` reported nothing). The string is now split and analysed.
+- **Other ways into a shell**: `su -c`, `runuser`, `script -c`, `setsid`, `busybox sh`, `npx -c` / `pnpm dlx -c`, WSL without `-e` followed by `;` or `|`, and shell operators (`&&`, `;`, `$(…)`, backquotes) in a command line written in `command`.
+- **Remote scripts**: `uv run https://…`, `deno run https://…` (CW107) and `deno run npm:…` / `jsr:…` without an exact version (CW102).
+- **Quoted program names** (`cmd /c "npx" …`) were not recognised.
+- **Misleading host in CW107 messages**: for `git+https://github.com/owner/repo.git@main` the message showed `main` as the host, and a crafted `https://evil.example/x@github.com/…` displayed `github.com` instead of the server that really serves the code. The host is now the one git and curl connect to, and it is hidden when the URL is ambiguous.
+
 ### Changed
 - **Renamed from `agentguard` to `configwarden`.** The old name is too close to existing projects on PyPI and in the MCP ecosystem (one of them, an MCP proxy, also installs an `agentguard` command). The command and the Python package are now `configwarden`, and rule IDs keep their numbers with a new prefix: `AG103` becomes `CW103`. Entries for earlier releases below keep the old names.
 - CW101 is now titled "MCP server runs a shell script or inline code".
@@ -14,6 +25,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - CW104 and CW106 also cover whole home directories (`/home/name`, `/Users/name`, `C:\Users\name`, `%USERPROFILE%`, `$env:USERPROFILE`), any drive root, `/root`, and credential folders (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`, `.azure`).
 - CW103 no longer reports documentation placeholders (`<YOUR_API_KEY>`, `your-api-key-here`, `xxxx`) or references written as `%VAR%`, `$env:VAR` or `${{ secrets.NAME }}`.
 - CW100 (unreadable MCP configuration) is now **medium**: some AI clients still start the servers they can read from a broken file, so an unreadable file may hide a server.
+- **Far fewer false alarms**, measured on 3,099 MCP configuration examples published in npm and PyPI package documentation (CW103: 428 → 64 findings, CW001: 5 → 0):
+  - CW103 ignores more documentation placeholders (`sk-...`, `ghp_xxxx`, `{API_KEY}`, `your_key`, phrases in other languages, variable names written as values), settings whose name only contains a sensitive word (`MAX_TOKENS`, `OAUTH_PORT`, `TOKEN_URL`, `CLIENT_ID`, `SORT_KEY`, `TOKENIZER_MODEL`…), booleans, short numbers and words (except for passwords), and file paths (`GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json`).
+  - CW001 ignores documentation values: AWS `…EXAMPLE` keys, `sk-ant-xxxx…`, Slack tokens without digits (`xoxb-your-bot-token`) and private-key headers followed by `...` or by nothing.
+  - CW102 no longer reports a local path (`npx /path/to/server`, `uvx --from ./pkg`).
+- `NODE_TLS_REJECT_UNAUTHORIZED=0` is no longer reported as a hardcoded secret (CW103) but as disabled TLS checks (CW110).
+- The same finding is reported only once per server.
 
 ### Added
 - **CW109 (high)**: AI client settings that approve everything without asking: Claude Code (`enableAllProjectMcpServers`, `permissions.defaultMode: bypassPermissions`, `skipDangerousModePermissionPrompt`), VS Code (`chat.tools.global.autoApprove` and its former name `chat.tools.autoApprove`), Zed (`agent.always_allow_tool_actions`, `agent.tool_permissions.default: allow`, `session.trust_all_worktrees`), Cursor (`mcpAllowlist` or CLI `permissions.allow` granting `*:*`) and Kiro (Autopilot). Committed to a repository, such a setting turns opening a booby-trapped project into automatic execution.
@@ -28,6 +45,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - CW101 also detects `bash -lc` and grouped options, `env sh -c`, `wsl bash -c`, abbreviated PowerShell options (`-e`, `-ec`, `-Com`…) and **inline code** (`node -e`, `python -c`, `ruby -e`, `perl -e`, `php -r`, `deno eval`).
 - CW107 also detects GitHub shorthands (`npx owner/repo`), scp-style git addresses (`git@host:owner/repo`), Python direct references (`name @ git+https://…`) and Mercurial/Subversion/Bazaar sources.
 - CW103 also detects passwords inside URLs (`postgres://user:password@host`) whatever the variable name, and literal default values in `${VAR:-default}`.
+- **CW110 (high)**: TLS certificate checks turned off (`NODE_TLS_REJECT_UNAUTHORIZED=0`, `PYTHONHTTPSVERIFY=0`, `*_SSL_VERIFY=false`, `*_INSECURE=true`, `GIT_SSL_NO_VERIFY`, `UV_INSECURE_HOST`, `--insecure`, `--strict-ssl=false`, `--allow-insecure-host`, `--insecure-skip-tls-verify`…): anyone on the network path could read or change the traffic, tokens included.
+- CW103 also detects secrets **on the command line** (`--api-key …`, `--token=…`, `-e API_KEY=…`, `--header "Authorization: Bearer …"`), which other local users can also read in the process list, secrets **in URLs** (token as user name, `?api_key=…`, signed `sig=` parameters) in `url`, `env` and arguments, JSON-encoded headers in an environment variable, and `*_SESSION` / `*_COOKIE` keys.
+- A whole command line written in `command` (`"npx -y pkg"`) is now analysed.
 
 ## [0.2.2] - 2026-10-07
 
@@ -79,7 +99,8 @@ Three issues found during an internal security review of agentguard itself. They
 - Text, JSON and SARIF 2.1.0 reports; exit codes for CI.
 - Zero runtime dependencies; secrets are always redacted in reports.
 
-[Unreleased]: https://github.com/Matadi-afk/configwarden/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/Matadi-afk/configwarden/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Matadi-afk/configwarden/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/Matadi-afk/configwarden/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Matadi-afk/configwarden/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Matadi-afk/configwarden/releases/tag/v0.2.0

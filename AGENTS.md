@@ -21,17 +21,18 @@ src/configwarden/
   cli.py            Commandes `scan` et `rules`, codes de sortie 0/1/2 ; --output refuse d'écrire à travers un lien symbolique
   scanner.py        Parcours des fichiers (sans suivre les symlinks ; fichiers ordinaires seulement ; ignore binaires et > 1 Mo ; lit l'UTF-16/32 avec BOM) + appel des règles
   models.py         Severity (LOW < MEDIUM < HIGH < CRITICAL), Rule, Finding (chemin et message assainis à la création)
-  commands.py       analyse() : retire les enveloppes (cmd /c, wsl, env, sudo, bash -c…) et relève les risques CW101
+  commands.py       analyse() : retire les enveloppes (cmd /c, wsl, env -S, sudo, uv run, bash -c, su -c…), ramène pnpm dlx / bun x / uv tool run… à npx / uvx et relève les risques CW101
+  values.py         Forme d'une valeur : modèle à remplir, booléen, nombre, mot, chemin (filtre les fausses alertes de CW001 et CW103)
   jsonc.py          loads() : JSON strict, sinon JSON avec commentaires et virgules finales (temps linéaire, positions conservées)
   redact.py         redact() masque un secret ; redact_url() masque identifiants et paramètres d'URL ; url_origin() ne garde que « schéma://hôte/… » ; sanitize() neutralise les caractères de contrôle et invisibles
   config.py         Secret + get_secret() : lecture sécurisée des variables d'environnement (étape 8)
   rules/
     __init__.py     ALL_RULES = liste de toutes les règles
     secrets.py      CW001 : secrets en clair (regex par fournisseur)
-    mcp.py          CW100-CW109 : configurations MCP dangereuses et réglages « tout approuver » ; lit tout fichier .json/.jsonc (voir « Formats reconnus »)
+    mcp.py          CW100-CW110 : configurations MCP dangereuses et réglages « tout approuver » ; lit tout fichier .json/.jsonc (voir « Formats reconnus »)
   reporters/        text.py, json_reporter.py, sarif.py (+ RENDERERS dans __init__)
-tests/              pytest ; conftest.py fournit fake_secret() et write_mcp ; test_hardening.py rejoue les attaques connues ; test_real_configs.py couvre le format de chaque outil IA
-examples/           vulnerable-mcp/ (doit déclencher CW101-CW109) et safe-mcp/ (doit rester propre). Fichiers nommés pour qu'aucun outil IA ne les charge (jamais `.vscode/mcp.json`, `.mcp.json`, `.claude/settings.json`…)
+tests/              pytest ; conftest.py fournit fake_secret() et write_mcp ; test_hardening.py rejoue les attaques connues ; test_real_configs.py couvre le format de chaque outil IA ; test_review_fixes.py rejoue les constats de l'Auditeur et du grand test
+examples/           vulnerable-mcp/ (doit déclencher CW101-CW110) et safe-mcp/ (doit rester propre). Fichiers nommés pour qu'aucun outil IA ne les charge (jamais `.vscode/mcp.json`, `.mcp.json`, `.claude/settings.json`…)
 docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macOS)
 ```
 
@@ -39,19 +40,20 @@ docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macO
 
 | ID | Gravité | Fichier | Détecte |
 |----|---------|---------|---------|
-| CW001 | critical | rules/secrets.py | Clé API ou token en clair |
+| CW001 | critical | rules/secrets.py | Clé API ou token en clair (exemples de documentation ignorés : `…EXAMPLE`, `xxxx`, clé tronquée) |
 | CW100 | medium | rules/mcp.py | Config MCP illisible (certains outils lancent quand même une partie d'un fichier abîmé) |
-| CW101 | high | rules/mcp.py | Shell qui reçoit un script (`bash -c`, `pwsh -Command`), `cmd /c` avec une ligne de commande ou des caractères spéciaux, code en ligne (`node -e`, `python -c`) |
-| CW102 | medium | rules/mcp.py | Paquet `npx`/`uvx` sans version **exacte** (`^1.0`, `@beta`, `>=1` ne comptent pas) |
-| CW103 | high | rules/mcp.py | Secret littéral dans `env` ou `headers`, y compris mot de passe dans une URL et valeur par défaut de `${VAR:-…}` (références et modèles `<YOUR_KEY>` ignorés) |
+| CW101 | high | rules/mcp.py | Shell qui reçoit un script (`bash -c`, `pwsh -Command`, `su -c`), `cmd /c` ou WSL avec une ligne de commande ou des caractères spéciaux, `npx -c`, opérateurs shell dans `command`, code en ligne (`node -e`, `python -c`) |
+| CW102 | medium | rules/mcp.py | Paquet du registre sans version **exacte** (`^1.0`, `@beta`, `>=1` ne comptent pas), quel que soit le lanceur (npx, uvx, pnpm dlx, bun x, uv tool run, pipx run, deno run npm:…) ; chemin local ignoré |
+| CW103 | high | rules/mcp.py | Secret littéral dans `env`, `headers`, la ligne de commande (`--api-key`, `-e TOKEN=`) ou une URL (mot de passe, `?token=`), valeur par défaut de `${VAR:-…}` ; références, modèles, réglages et chemins ignorés (values.py) |
 | CW104 | high | rules/mcp.py | Serveur filesystem ouvert sur `/`, un lecteur entier ou un dossier personnel complet |
 | CW105 | high | rules/mcp.py | Serveur distant en `http://` |
 | CW106 | high | rules/mcp.py | Conteneur Docker/Podman qui casse l'isolation (`--privileged`, `=host`, montage de `/`, du dossier personnel, de `.ssh`/`.aws`… ou du socket Docker) |
-| CW107 | high | rules/mcp.py | Paquet installé depuis git, une URL, un raccourci GitHub `auteur/projet` ou `nom @ url` (remplace CW102 pour ce paquet) |
+| CW107 | high | rules/mcp.py | Paquet ou script installé depuis git, une URL, un raccourci GitHub `auteur/projet` ou `nom @ url`, y compris `uv run --with` et `deno run https://…` (remplace CW102 pour ce paquet) |
 | CW108 | medium | rules/mcp.py | Outils approuvés sans confirmation (`alwaysAllow`, `autoApprove`, `trust: true`) |
 | CW109 | high | rules/mcp.py | Réglage de l'outil IA qui approuve tout : Claude Code (`enableAllProjectMcpServers`, `bypassPermissions`, `skipDangerousModePermissionPrompt`), VS Code (`chat.tools.global.autoApprove`), Zed, Cursor (`*:*`), Kiro (Autopilot) |
+| CW110 | high | rules/mcp.py | Vérification TLS coupée : `NODE_TLS_REJECT_UNAUTHORIZED=0`, `*_SSL_VERIFY=false`, `--insecure`, `--strict-ssl=false`, `--allow-insecure-host` |
 
-Prochain ID libre : **CW002** (secrets) ou **CW110** (MCP).
+Prochain ID libre : **CW002** (secrets) ou **CW111** (MCP).
 
 ## Formats reconnus
 
@@ -131,5 +133,5 @@ Fil rouge du projet : configwarden est un outil de sécurité, il doit être lui
 
 ## État du projet
 
-- Version 0.2.2 publiée (10 règles, deux séries de correctifs de sécurité). v0.3.0 en cours : vrais fichiers de configuration (jour 1), commandes enveloppées et angles morts CW101 à CW107 (jour 2), règle CW109 et SARIF (jour 3). 384 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
+- Version 0.3.0 (12 règles) : vrais fichiers de configuration, commandes enveloppées, CW109 et SARIF, puis corrections de la revue de l'Auditeur et du grand test sur 3 099 exemples publiés (règle CW110). 572 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
 - Cap fixé jusqu'au 4 novembre 2026 : publier sur GitHub, ajouter 3 règles, faire un premier post. Voir `IDEES.md` pour ce qui est volontairement mis de côté.
