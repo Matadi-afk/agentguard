@@ -1,4 +1,4 @@
-"""Règles AG1xx : configurations de serveurs MCP dangereuses.
+"""Règles CW1xx : configurations de serveurs MCP dangereuses.
 
 MCP (Model Context Protocol) permet à un agent IA (Claude, Cursor, VS Code…)
 d'utiliser des outils externes. Une mauvaise config peut donner à l'IA, ou
@@ -27,17 +27,17 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
-from agentguard import commands, jsonc
-from agentguard.models import Finding, Rule, Severity
-from agentguard.redact import redact, redact_url, url_origin
+from configwarden import commands, jsonc
+from configwarden.models import Finding, Rule, Severity
+from configwarden.redact import redact, redact_url, url_origin
 
 # --- Définition des règles -----------------------------------------------------
 
 # Gravité moyenne (décision du 8 octobre 2026) : certains outils IA tolèrent les
 # erreurs de syntaxe et lancent quand même les serveurs qu'ils ont pu lire. Un
-# fichier abîmé exprès pourrait donc cacher un serveur à agentguard.
+# fichier abîmé exprès pourrait donc cacher un serveur à configwarden.
 INVALID_CONFIG = Rule(
-    id="AG100",
+    id="CW100",
     title="Unreadable MCP configuration",
     severity=Severity.MEDIUM,
     remediation=(
@@ -46,7 +46,7 @@ INVALID_CONFIG = Rule(
     ),
 )
 SHELL_EXECUTION = Rule(
-    id="AG101",
+    id="CW101",
     title="MCP server runs through a shell",
     severity=Severity.HIGH,
     remediation=(
@@ -55,7 +55,7 @@ SHELL_EXECUTION = Rule(
     ),
 )
 UNPINNED_PACKAGE = Rule(
-    id="AG102",
+    id="CW102",
     title="Unpinned MCP package version",
     severity=Severity.MEDIUM,
     remediation=(
@@ -64,7 +64,7 @@ UNPINNED_PACKAGE = Rule(
     ),
 )
 HARDCODED_ENV_SECRET = Rule(
-    id="AG103",
+    id="CW103",
     title="Secret hardcoded in MCP configuration",
     severity=Severity.HIGH,
     remediation=(
@@ -73,7 +73,7 @@ HARDCODED_ENV_SECRET = Rule(
     ),
 )
 BROAD_FILESYSTEM = Rule(
-    id="AG104",
+    id="CW104",
     title="Overly broad filesystem access",
     severity=Severity.HIGH,
     remediation=(
@@ -82,14 +82,14 @@ BROAD_FILESYSTEM = Rule(
     ),
 )
 INSECURE_TRANSPORT = Rule(
-    id="AG105",
+    id="CW105",
     title="Remote MCP server over plain HTTP",
     severity=Severity.HIGH,
     remediation="Use https:// so tokens and data cannot be intercepted.",
 )
 
 DANGEROUS_CONTAINER = Rule(
-    id="AG106",
+    id="CW106",
     title="MCP server container escapes isolation",
     severity=Severity.HIGH,
     remediation=(
@@ -98,7 +98,7 @@ DANGEROUS_CONTAINER = Rule(
     ),
 )
 UNTRUSTED_PACKAGE_SOURCE = Rule(
-    id="AG107",
+    id="CW107",
     title="MCP package installed from an unverified source",
     severity=Severity.HIGH,
     remediation=(
@@ -107,7 +107,7 @@ UNTRUSTED_PACKAGE_SOURCE = Rule(
     ),
 )
 AUTO_APPROVED_TOOLS = Rule(
-    id="AG108",
+    id="CW108",
     title="MCP tools run without user confirmation",
     severity=Severity.MEDIUM,
     remediation=(
@@ -130,7 +130,7 @@ RULES = [
 
 # --- Constantes de détection ---------------------------------------------------
 
-# Fichiers propres à MCP : s'ils sont illisibles, on le signale (AG100), et la clé
+# Fichiers propres à MCP : s'ils sont illisibles, on le signale (CW100), et la clé
 # « servers » (VS Code) n'y est reconnue que là. Les autres fichiers JSON sont lus
 # aussi, mais restent silencieux s'ils sont illisibles ou sans serveur MCP.
 MCP_CONFIG_NAMES = {
@@ -222,7 +222,7 @@ _UV_OPTIONS_WITH_VALUE = {
 _SENSITIVE_KEY = re.compile(
     r"KEY|TOKEN|SECRET|PASS|(?<![A-Z])PAT(?![A-Z])|AUTH|CREDENTIAL", re.IGNORECASE
 )
-# AG103 : références à une variable (pas un secret) selon les outils :
+# CW103 : références à une variable (pas un secret) selon les outils :
 # $VAR, ${VAR}, ${env:VAR}, ${input:id}, %VAR% (Windows), $env:VAR (PowerShell),
 # ${{ secrets.NOM }} (Continue).
 _ENV_REFERENCE = re.compile(
@@ -245,7 +245,7 @@ _PLACEHOLDER = re.compile(
 _URL_PASSWORD = re.compile(
     r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}://[^/@\s:]{0,256}:([^@\s/]{1,512})@"
 )
-# AG104 / AG106 : dossiers trop larges (racine, lecteur, dossier personnel entier).
+# CW104 / CW106 : dossiers trop larges (racine, lecteur, dossier personnel entier).
 _BROAD_PATH = re.compile(
     r"/|/root|[a-z]:|(?:/home|/users|[a-z]:/users)(?:/[^/]+)?"
     r"|~|\$home|\$\{home\}|\$\{userhome\}|%userprofile%|%homepath%"
@@ -258,14 +258,14 @@ _CREDENTIAL_FOLDER = re.compile(
 )
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}  # noqa: S104 (liste de comparaison)
 
-# AG106 : moteurs de conteneurs et options qui cassent l'isolation.
+# CW106 : moteurs de conteneurs et options qui cassent l'isolation.
 _CONTAINER_ENGINES = {"docker", "podman", "nerdctl"}
 _HOST_NAMESPACE_FLAGS = {"--network", "--net", "--pid", "--ipc", "--uts", "--userns"}
 _MOUNT_FLAGS = {"-v", "--volume"}
 _DANGEROUS_CAPABILITIES = {"ALL", "SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "NET_ADMIN"}
 _SENSITIVE_MOUNT_SOURCES = {"/etc", "/root", "/var/run", "/run"}
 
-# AG107 : préfixes qui désignent un paquet hors registre officiel.
+# CW107 : préfixes qui désignent un paquet hors registre officiel.
 _UNTRUSTED_SOURCE_PREFIXES = (
     "git+",
     "git://",
@@ -291,7 +291,7 @@ _UV_EXACT_VERSION = re.compile(
     r"\s*[A-Za-z0-9._-]+(?:\[[^\]]*\])?\s*(?:===?|@)\s*v?\d[0-9A-Za-z.+!-]*\s*"
 )
 
-# AG108 : clés qui autorisent des outils sans confirmation, selon le client IA.
+# CW108 : clés qui autorisent des outils sans confirmation, selon le client IA.
 _AUTO_APPROVE_KEYS = ("alwaysAllow", "autoApprove")
 
 
@@ -321,7 +321,7 @@ def is_client_config_path(path: PurePosixPath) -> bool:
 
 
 def unreadable_config_finding(path: str) -> Finding:
-    """Fichier de configuration qu'agentguard n'a pas pu lire du tout."""
+    """Fichier de configuration que configwarden n'a pas pu lire du tout."""
     return Finding(
         rule=INVALID_CONFIG,
         path=path,
@@ -340,7 +340,7 @@ def symlinked_config_finding(path: str) -> Finding:
         path=path,
         line=1,
         message=(
-            "This AI client configuration is a symbolic link. agentguard does not follow "
+            "This AI client configuration is a symbolic link. configwarden does not follow "
             "links (they can point outside the project): check what it points to."
         ),
     )
@@ -622,16 +622,16 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
 
     if isinstance(command, str) and command.strip():
         # Les enveloppes (cmd /c, wsl, env, sudo, bash -c…) sont retirées : on vérifie
-        # le programme vraiment lancé, et on relève au passage les risques AG101.
+        # le programme vraiment lancé, et on relève au passage les risques CW101.
         launch = commands.analyse(command, args)
         exe, args = launch.executable, launch.args
 
-        # AG101 : shell, ligne de commande ou code en ligne (une seule alerte par serveur)
+        # CW101 : shell, ligne de commande ou code en ligne (une seule alerte par serveur)
         if launch.risks:
             add(SHELL_EXECUTION, f"Server '{name}' {launch.risks[0]}.")
 
         if exe in _PACKAGE_RUNNERS:
-            # AG107 : paquet hors registre (git, URL…). Plus grave qu'AG102, qu'on ne
+            # CW107 : paquet hors registre (git, URL…). Plus grave qu'CW102, qu'on ne
             # signale pas en plus pour éviter deux alertes sur la même ligne.
             source = _untrusted_source(exe, args)
             if source:
@@ -643,7 +643,7 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
                     "instead of a registry.",
                 )
             else:
-                # AG102 : paquet non figé
+                # CW102 : paquet non figé
                 package = _package_spec(exe, args)
                 if package and not _package_is_pinned(exe, package):
                     add(
@@ -651,18 +651,18 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
                         f"Server '{name}' runs '{redact_url(package)}' without a pinned version.",
                     )
 
-        # AG106 : conteneur qui casse son isolation
+        # CW106 : conteneur qui casse son isolation
         if exe in _CONTAINER_ENGINES:
             for issue in _container_issues(args):
                 add(DANGEROUS_CONTAINER, f"Server '{name}' runs a container with {issue}.")
 
-        # AG104 : accès disque trop large (serveur "filesystem")
+        # CW104 : accès disque trop large (serveur "filesystem")
         if any("filesystem" in a.lower() for a in args):
             for arg in args:
                 if _is_broad_path(arg):
                     add(BROAD_FILESYSTEM, f"Server '{name}' exposes '{arg}' to the AI agent.")
 
-    # AG103 : secrets en dur dans env / headers
+    # CW103 : secrets en dur dans env / headers
     for block_name in ("env", "headers"):
         block = server.get(block_name)
         if not isinstance(block, dict):
@@ -688,7 +688,7 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
                 f"Server '{name}' sets {block_name}.{key} to a literal value ({redact(value)}).",
             )
 
-    # AG105 : serveur distant en HTTP non chiffré (« url », « serverUrl » ou « httpUrl »)
+    # CW105 : serveur distant en HTTP non chiffré (« url », « serverUrl » ou « httpUrl »)
     reported_hosts: set[str] = set()
     for url_key in _URL_KEYS:
         url = server.get(url_key)
@@ -700,7 +700,7 @@ def _check_server(name: str, server: dict, line: int, path: str) -> list[Finding
             shown = host or "an unreadable address"
             add(INSECURE_TRANSPORT, f"Server '{name}' connects to {shown} over HTTP.")
 
-    # AG108 : outils exécutés sans confirmation de l'utilisateur
+    # CW108 : outils exécutés sans confirmation de l'utilisateur
     for key in _AUTO_APPROVE_KEYS:
         tools = server.get(key)
         if isinstance(tools, list) and tools:

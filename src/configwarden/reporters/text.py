@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from agentguard.models import Severity
-from agentguard.scanner import ScanResult
+from configwarden.models import Severity
+from configwarden.scanner import ScanResult
 
 _COLORS = {
     Severity.CRITICAL: "\033[1;35m",

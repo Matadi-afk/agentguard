@@ -1,4 +1,4 @@
-"""Tests de durcissement : agentguard face à des fichiers MALVEILLANTS.
+"""Tests de durcissement : configwarden face à des fichiers MALVEILLANTS.
 
 Un outil de sécurité lit des fichiers écrits par n'importe qui. Ces tests
 reproduisent trois attaques trouvées lors de la revue de sécurité du
@@ -17,14 +17,14 @@ import time
 
 import pytest
 
-from agentguard import scanner as scanner_module
-from agentguard.cli import main
-from agentguard.models import Finding
-from agentguard.redact import redact, redact_url, sanitize
-from agentguard.reporters.text import render_text
-from agentguard.rules import mcp
-from agentguard.rules.mcp import INSECURE_TRANSPORT
-from agentguard.scanner import ScanResult, scan
+from configwarden import scanner as scanner_module
+from configwarden.cli import main
+from configwarden.models import Finding
+from configwarden.redact import redact, redact_url, sanitize
+from configwarden.reporters.text import render_text
+from configwarden.rules import mcp
+from configwarden.rules.mcp import INSECURE_TRANSPORT
+from configwarden.scanner import ScanResult, scan
 from tests.conftest import fake_secret
 
 # Faux identifiant assemblé à l'exécution (jamais écrit en clair dans le dépôt).
@@ -73,7 +73,7 @@ def test_credentials_in_package_url_never_reach_any_report(write_mcp, tmp_path, 
 def test_credentials_in_uvx_from_are_redacted(write_mcp) -> None:
     args = ["--from", f"git+https://bob:{FAKE_TOKEN}@gitlab.com/x/y", "server"]
     findings = scan(write_mcp({"s": {"command": "uvx", "args": args}})).findings
-    assert [f.rule.id for f in findings] == ["AG107"]
+    assert [f.rule.id for f in findings] == ["CW107"]
     assert FAKE_TOKEN not in findings[0].message
 
 
@@ -109,7 +109,7 @@ def test_finding_message_and_path_are_sanitized_at_creation() -> None:
 def test_hostile_server_name_cannot_inject_lines_or_escape_codes(write_mcp) -> None:
     path = write_mcp({HOSTILE_NAME: {"url": "http://evil.example"}})
     result = scan(path)
-    assert [f.rule.id for f in result.findings] == ["AG105"]
+    assert [f.rule.id for f in result.findings] == ["CW105"]
     for color in (False, True):
         out = render_text(result, color=color)
         # Aucune ligne ne peut commencer par une commande de workflow GitHub Actions.
@@ -133,7 +133,7 @@ def test_deeply_nested_json_does_not_crash_the_scan(tmp_path) -> None:
     (tmp_path / "app.py").write_text("token = '" + fake_secret("ghp_", 36) + "'\n")
     ids = sorted(f.rule.id for f in scan(tmp_path).findings)
     # Le fichier piégé est signalé comme illisible ET le reste du projet est analysé.
-    assert ids == ["AG001", "AG100"]
+    assert ids == ["CW001", "CW100"]
 
 
 @pytest.mark.parametrize(
@@ -159,17 +159,17 @@ def test_sarif_output_stays_valid_json_with_hostile_input(write_mcp, capsys) -> 
     path = write_mcp({HOSTILE_NAME: {"url": "http://evil.example"}})
     main(["scan", str(path), "--format", "sarif"])
     sarif = json.loads(capsys.readouterr().out)
-    assert sarif["runs"][0]["results"][0]["ruleId"] == "AG105"
+    assert sarif["runs"][0]["results"][0]["ruleId"] == "CW105"
 
 
 # --- Garde-fou permanent : pas de caractères invisibles dans notre propre code ---
 
 
 def test_no_invisible_or_bidi_characters_in_source() -> None:
-    """Empêche une attaque « Trojan Source » contre agentguard lui-même."""
+    """Empêche une attaque « Trojan Source » contre configwarden lui-même."""
     from pathlib import Path
 
-    from agentguard.redact import sanitize as _sanitize
+    from configwarden.redact import sanitize as _sanitize
 
     root = Path(__file__).resolve().parent.parent
     offenders = []
@@ -230,7 +230,7 @@ def test_malformed_url_does_not_crash_the_scan(tmp_path) -> None:
     (tmp_path / "app.py").write_text("token = '" + fake_secret("ghp_", 36) + "'\n")
     ids = sorted(f.rule.id for f in scan(tmp_path).findings)
     # Le serveur reste signalé (http://) ET le reste du projet est analysé.
-    assert ids == ["AG001", "AG105"]
+    assert ids == ["CW001", "CW105"]
 
 
 def test_malformed_url_never_echoes_its_credentials(write_mcp, capsys) -> None:
@@ -252,7 +252,7 @@ def test_one_broken_server_does_not_hide_the_others(write_mcp, monkeypatch) -> N
 
     monkeypatch.setattr(mcp, "_check_server", flaky)
     path = write_mcp({"boom": {"url": "http://a.example"}, "ok": {"url": "http://b.example"}})
-    assert sorted(f.rule.id for f in scan(path).findings) == ["AG100", "AG105"]
+    assert sorted(f.rule.id for f in scan(path).findings) == ["CW100", "CW105"]
 
 
 # --- V6 : caractères Unicode invalides ou invisibles dans la sortie -------------
@@ -279,7 +279,7 @@ def test_surrogate_in_server_name_still_produces_a_report(tmp_path, fmt) -> None
     report = tmp_path / "out.txt"
     assert main(["scan", str(tmp_path), "--format", fmt, "--output", str(report)]) == 1
     content = report.read_text(encoding="utf-8")
-    assert "AG105" in content
+    assert "CW105" in content
     if fmt != "text":
         json.loads(content)
 
@@ -292,7 +292,7 @@ def test_output_refuses_to_follow_a_symlink(tmp_path, capsys) -> None:
     victim.write_text("precious")
     project = tmp_path / "repo"
     project.mkdir()
-    link = project / "agentguard.sarif"
+    link = project / "configwarden.sarif"
     try:
         os.symlink(victim, link)
     except (OSError, NotImplementedError):
@@ -328,7 +328,7 @@ def test_escaped_server_name_gets_the_right_line(tmp_path) -> None:
         '    "\\u0062": {"url": "http://x.example"}\n  }\n}'
     )
     (tmp_path / "mcp.json").write_text(text)
-    assert [(f.rule.id, f.line) for f in scan(tmp_path).findings] == [("AG105", 4)]
+    assert [(f.rule.id, f.line) for f in scan(tmp_path).findings] == [("CW105", 4)]
 
 
 # --- V9 : fichiers spéciaux et dossiers illisibles ------------------------------
@@ -343,7 +343,7 @@ def test_fifo_does_not_hang_the_scan(tmp_path) -> None:
     worker.start()
     worker.join(timeout=10)
     assert not worker.is_alive(), "scan blocked on a FIFO"
-    assert [f.rule.id for f in outcome[0].findings] == ["AG001"]
+    assert [f.rule.id for f in outcome[0].findings] == ["CW001"]
     assert outcome[0].files_skipped == 1
 
 
@@ -369,7 +369,7 @@ def test_short_secret_reveals_nothing() -> None:
 
 @pytest.mark.parametrize(
     ("key", "expected"),
-    [("PATH", []), ("GITHUB_PAT", ["AG103"]), ("DB_PASS", ["AG103"]), ("DB_PASSWORD", ["AG103"])],
+    [("PATH", []), ("GITHUB_PAT", ["CW103"]), ("DB_PASS", ["CW103"]), ("DB_PASSWORD", ["CW103"])],
 )
 def test_sensitive_env_key_detection(write_mcp, key, expected) -> None:
     path = write_mcp({"s": {"command": "srv", "env": {key: "literal-value-0123456789"}}})
@@ -428,7 +428,7 @@ def test_uvx_with_git_dependency_is_flagged(write_mcp) -> None:
     args = ["--with", "git+https://github.com/someone/helper", "acme-mcp==1.0"]
     assert [
         f.rule.id for f in scan(write_mcp({"s": {"command": "uvx", "args": args}})).findings
-    ] == ["AG107"]
+    ] == ["CW107"]
 
 
 def test_escaped_quotes_cannot_slow_down_line_numbers(tmp_path) -> None:
@@ -439,13 +439,13 @@ def test_escaped_quotes_cannot_slow_down_line_numbers(tmp_path) -> None:
     start = time.perf_counter()
     findings = scan(tmp_path).findings
     assert time.perf_counter() - start < 5
-    assert [f.rule.id for f in findings] == ["AG105"]
+    assert [f.rule.id for f in findings] == ["CW105"]
 
 
 def test_output_refuses_a_symlinked_parent_directory(tmp_path, capsys, monkeypatch) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "agentguard.sarif").write_text("precious")
+    (outside / "configwarden.sarif").write_text("precious")
     project = tmp_path / "repo"
     project.mkdir()
     try:
@@ -453,9 +453,9 @@ def test_output_refuses_a_symlinked_parent_directory(tmp_path, capsys, monkeypat
     except (OSError, NotImplementedError):
         pytest.skip("symbolic links not available on this system")
     monkeypatch.chdir(project)
-    code = main(["scan", ".", "--format", "sarif", "--output", "reports/agentguard.sarif"])
+    code = main(["scan", ".", "--format", "sarif", "--output", "reports/configwarden.sarif"])
     assert code == 2
-    assert (outside / "agentguard.sarif").read_text() == "precious"
+    assert (outside / "configwarden.sarif").read_text() == "precious"
 
 
 @pytest.mark.parametrize("code", [0xFE00, 0xFE0F, 0xE0100, 0xE01EF, 0x115F, 0x3164, 0xFFA0])
@@ -487,7 +487,7 @@ def test_text_report_warns_when_files_were_not_analysed(tmp_path) -> None:
 )
 def test_options_never_hide_a_git_source(write_mcp, command, args) -> None:
     findings = scan(write_mcp({"s": {"command": command, "args": args}})).findings
-    assert [f.rule.id for f in findings] == ["AG107"]
+    assert [f.rule.id for f in findings] == ["CW107"]
 
 
 @pytest.mark.parametrize(
@@ -503,16 +503,16 @@ def test_url_origin_edge_cases_never_leak(write_mcp, capsys, source) -> None:
     path = write_mcp({"s": {"command": "npx", "args": ["-y", source]}})
     main(["scan", str(path)])
     out = capsys.readouterr().out
-    assert "AG107" in out
+    assert "CW107" in out
     assert FAKE_TOKEN not in out
 
 
 def test_output_refuses_parent_directory_components(tmp_path, capsys, monkeypatch) -> None:
     (tmp_path / "reports").mkdir()
     monkeypatch.chdir(tmp_path)
-    assert main(["scan", ".", "--output", "reports/../agentguard.sarif"]) == 2
+    assert main(["scan", ".", "--output", "reports/../configwarden.sarif"]) == 2
     assert ".." in capsys.readouterr().err
-    assert not (tmp_path / "agentguard.sarif").exists()
+    assert not (tmp_path / "configwarden.sarif").exists()
 
 
 @pytest.mark.parametrize("code", [0x034F, 0x17B4, 0x17B5, 0xFFF0, 0xE0080, 0xE01F0, 0x1BCA0])

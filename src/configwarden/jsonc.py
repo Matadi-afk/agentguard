@@ -2,7 +2,7 @@
 
 VS Code, Zed, Cursor ou Gemini CLI acceptent dans leurs fichiers de configuration
 des commentaires (``// …`` et ``/* … */``) et des virgules finales (``[1, 2,]``).
-Un lecteur JSON strict les déclare illisibles : agentguard passerait alors à côté
+Un lecteur JSON strict les déclare illisibles : configwarden passerait alors à côté
 de configurations bien réelles.
 
 Précautions de sécurité :
@@ -15,7 +15,7 @@ Précautions de sécurité :
   un espace : les positions et les numéros de ligne restent exacts ;
 - json.loads reste seul juge de la validité du résultat. Il accepte les caractères
   de contrôle bruts dans les chaînes (strict=False), comme les lecteurs tolérants des
-  outils IA : sinon, une simple tabulation suffirait à cacher un fichier à agentguard.
+  outils IA : sinon, une simple tabulation suffirait à cacher un fichier à configwarden.
 """
 
 from __future__ import annotations

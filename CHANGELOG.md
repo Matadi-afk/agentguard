@@ -5,23 +5,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-### Added
-- **Real-world configuration files**: agentguard now reads every `.json` / `.jsonc` file and finds MCP servers wherever the main AI clients keep them: VS Code (`.vscode/mcp.json`, legacy `mcp.servers` in settings, `devcontainer.json`), Claude Code (`~/.claude.json`, user and per-project servers), Gemini CLI (`.gemini/settings.json`, extensions), Zed (`context_servers`, both command formats), Cline, Roo Code, Kiro, Amazon Q and GitHub Copilot CLI files. Other JSON files are only reported when they contain MCP servers.
-- **JSON with comments and trailing commas** (JSONC), as written by VS Code, Zed or Cursor. It is read in linear time, positions and line numbers are preserved, and a comment can never hide a syntax error. Raw control characters inside strings are tolerated, as lenient client parsers do.
-- **Configurations that cannot be audited are reported** (AG100) instead of being silently skipped, so a tolerant AI client cannot run a server agentguard never saw: oversized, binary-looking or symbolic-link configuration files and folders of AI clients (`.vscode/`, `.cursor/`, `.gemini/`, `.claude/`…), and broken JSON files that declare MCP servers.
-- Files encoded in **UTF-16 or UTF-32** (with a byte-order mark), which VS Code opens, are now read by every rule, including secret detection, instead of being skipped as binary.
-- AG105 also checks Gemini CLI's `httpUrl` key.
-- **Wrapped commands are analysed**: `cmd /c`, `wsl`, `env`, `sudo`, `timeout`, `nice` and the script given to `bash -c` / `pwsh -Command` are unwrapped, so AG102, AG104, AG106 and AG107 check the program that really runs. Windows launchers such as `npx.cmd` are recognised.
-- AG101 also detects `bash -lc` and grouped options, `env sh -c`, `wsl bash -c`, abbreviated PowerShell options (`-e`, `-ec`, `-Com`…) and **inline code** (`node -e`, `python -c`, `ruby -e`, `perl -e`, `php -r`, `deno eval`).
-- AG107 also detects GitHub shorthands (`npx owner/repo`), scp-style git addresses (`git@host:owner/repo`), Python direct references (`name @ git+https://…`) and Mercurial/Subversion/Bazaar sources.
-- AG103 also detects passwords inside URLs (`postgres://user:password@host`) whatever the variable name, and literal default values in `${VAR:-default}`.
-
 ### Changed
-- AG101: `cmd /c` that starts a program given as separate words, without special characters (`& | < > ^ % !`), is no longer reported, since it is the documented way to start `npx` on Windows; the program it starts is analysed instead. A single command-line string or special characters are still reported.
-- AG102 only accepts **exact** versions: `pkg@^1.0.0`, `pkg@~1.2`, `pkg@1`, `pkg@beta`, `pkg>=1.0` or `pkg==1.*` are now reported as unpinned.
-- AG104 and AG106 also cover whole home directories (`/home/name`, `/Users/name`, `C:\Users\name`, `%USERPROFILE%`, `$env:USERPROFILE`), any drive root, `/root`, and credential folders (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`, `.azure`).
-- AG103 no longer reports documentation placeholders (`<YOUR_API_KEY>`, `your-api-key-here`, `xxxx`) or references written as `%VAR%`, `$env:VAR` or `${{ secrets.NAME }}`.
-- AG100 (unreadable MCP configuration) is now **medium**: some AI clients still start the servers they can read from a broken file, so an unreadable file may hide a server.
+- **Renamed from `agentguard` to `configwarden`.** The old name is too close to existing projects on PyPI and in the MCP ecosystem (one of them, an MCP proxy, also installs an `agentguard` command). The command and the Python package are now `configwarden`, and rule IDs keep their numbers with a new prefix: `AG103` becomes `CW103`. Entries for earlier releases below keep the old names.
+- CW101: `cmd /c` that starts a program given as separate words, without special characters (`& | < > ^ % !`), is no longer reported, since it is the documented way to start `npx` on Windows; the program it starts is analysed instead. A single command-line string or special characters are still reported.
+- CW102 only accepts **exact** versions: `pkg@^1.0.0`, `pkg@~1.2`, `pkg@1`, `pkg@beta`, `pkg>=1.0` or `pkg==1.*` are now reported as unpinned.
+- CW104 and CW106 also cover whole home directories (`/home/name`, `/Users/name`, `C:\Users\name`, `%USERPROFILE%`, `$env:USERPROFILE`), any drive root, `/root`, and credential folders (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`, `.azure`).
+- CW103 no longer reports documentation placeholders (`<YOUR_API_KEY>`, `your-api-key-here`, `xxxx`) or references written as `%VAR%`, `$env:VAR` or `${{ secrets.NAME }}`.
+- CW100 (unreadable MCP configuration) is now **medium**: some AI clients still start the servers they can read from a broken file, so an unreadable file may hide a server.
+
+### Added
+- **Real-world configuration files**: configwarden now reads every `.json` / `.jsonc` file and finds MCP servers wherever the main AI clients keep them: VS Code (`.vscode/mcp.json`, legacy `mcp.servers` in settings, `devcontainer.json`), Claude Code (`~/.claude.json`, user and per-project servers), Gemini CLI (`.gemini/settings.json`, extensions), Zed (`context_servers`, both command formats), Cline, Roo Code, Kiro, Amazon Q and GitHub Copilot CLI files. Other JSON files are only reported when they contain MCP servers.
+- **JSON with comments and trailing commas** (JSONC), as written by VS Code, Zed or Cursor. It is read in linear time, positions and line numbers are preserved, and a comment can never hide a syntax error. Raw control characters inside strings are tolerated, as lenient client parsers do.
+- **Configurations that cannot be audited are reported** (CW100) instead of being silently skipped, so a tolerant AI client cannot run a server configwarden never saw: oversized, binary-looking or symbolic-link configuration files and folders of AI clients (`.vscode/`, `.cursor/`, `.gemini/`, `.claude/`…), and broken JSON files that declare MCP servers.
+- Files encoded in **UTF-16 or UTF-32** (with a byte-order mark), which VS Code opens, are now read by every rule, including secret detection, instead of being skipped as binary.
+- CW105 also checks Gemini CLI's `httpUrl` key.
+- **Wrapped commands are analysed**: `cmd /c`, `wsl`, `env`, `sudo`, `timeout`, `nice` and the script given to `bash -c` / `pwsh -Command` are unwrapped, so CW102, CW104, CW106 and CW107 check the program that really runs. Windows launchers such as `npx.cmd` are recognised.
+- CW101 also detects `bash -lc` and grouped options, `env sh -c`, `wsl bash -c`, abbreviated PowerShell options (`-e`, `-ec`, `-Com`…) and **inline code** (`node -e`, `python -c`, `ruby -e`, `perl -e`, `php -r`, `deno eval`).
+- CW107 also detects GitHub shorthands (`npx owner/repo`), scp-style git addresses (`git@host:owner/repo`), Python direct references (`name @ git+https://…`) and Mercurial/Subversion/Bazaar sources.
+- CW103 also detects passwords inside URLs (`postgres://user:password@host`) whatever the variable name, and literal default values in `${VAR:-default}`.
 
 ## [0.2.2] - 2026-10-07
 
@@ -73,7 +74,7 @@ Three issues found during an internal security review of agentguard itself. They
 - Text, JSON and SARIF 2.1.0 reports; exit codes for CI.
 - Zero runtime dependencies; secrets are always redacted in reports.
 
-[Unreleased]: https://github.com/Matadi-afk/agentguard/compare/v0.2.2...HEAD
-[0.2.2]: https://github.com/Matadi-afk/agentguard/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/Matadi-afk/agentguard/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/Matadi-afk/agentguard/releases/tag/v0.2.0
+[Unreleased]: https://github.com/Matadi-afk/configwarden/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Matadi-afk/configwarden/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/Matadi-afk/configwarden/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/Matadi-afk/configwarden/releases/tag/v0.2.0

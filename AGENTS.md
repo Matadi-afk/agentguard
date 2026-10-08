@@ -6,7 +6,9 @@ Ce fichier résume le projet pour qu'un assistant IA (Claude, Copilot, Cursor…
 
 ## Le projet en une phrase
 
-**agentguard** aide les développeurs qui branchent des agents IA à leurs outils à ne pas fuiter leurs secrets ni ouvrir leur machine.
+**configwarden** aide les développeurs qui branchent des agents IA à leurs outils à ne pas fuiter leurs secrets ni ouvrir leur machine.
+
+Anciennement **agentguard** : renommé le 8 octobre 2026, car ce nom était trop proche de projets existants (PyPI le refusait, et un autre outil MCP installe déjà une commande `agentguard`). Les règles gardent leurs numéros avec le préfixe `CW` (`AG103` → `CW103`).
 
 Il s'agit d'un scanner en ligne de commande, open source (Apache‑2.0), écrit en Python ≥ 3.10, **sans aucune dépendance à l'exécution**. Il produit des rapports en texte, JSON ou SARIF.
 
@@ -15,21 +17,21 @@ Toute idée qui ne sert pas cette phrase va dans `IDEES.md`, pas dans le code.
 ## Carte du code
 
 ```
-src/agentguard/
+src/configwarden/
   cli.py            Commandes `scan` et `rules`, codes de sortie 0/1/2 ; --output refuse d'écrire à travers un lien symbolique
   scanner.py        Parcours des fichiers (sans suivre les symlinks ; fichiers ordinaires seulement ; ignore binaires et > 1 Mo ; lit l'UTF-16/32 avec BOM) + appel des règles
   models.py         Severity (LOW < MEDIUM < HIGH < CRITICAL), Rule, Finding (chemin et message assainis à la création)
-  commands.py       analyse() : retire les enveloppes (cmd /c, wsl, env, sudo, bash -c…) et relève les risques AG101
+  commands.py       analyse() : retire les enveloppes (cmd /c, wsl, env, sudo, bash -c…) et relève les risques CW101
   jsonc.py          loads() : JSON strict, sinon JSON avec commentaires et virgules finales (temps linéaire, positions conservées)
   redact.py         redact() masque un secret ; redact_url() masque identifiants et paramètres d'URL ; url_origin() ne garde que « schéma://hôte/… » ; sanitize() neutralise les caractères de contrôle et invisibles
   config.py         Secret + get_secret() : lecture sécurisée des variables d'environnement (étape 8)
   rules/
     __init__.py     ALL_RULES = liste de toutes les règles
-    secrets.py      AG001 : secrets en clair (regex par fournisseur)
-    mcp.py          AG100-AG108 : configurations MCP dangereuses ; lit tout fichier .json/.jsonc (voir « Formats reconnus »)
+    secrets.py      CW001 : secrets en clair (regex par fournisseur)
+    mcp.py          CW100-CW108 : configurations MCP dangereuses ; lit tout fichier .json/.jsonc (voir « Formats reconnus »)
   reporters/        text.py, json_reporter.py, sarif.py (+ RENDERERS dans __init__)
 tests/              pytest ; conftest.py fournit fake_secret() et write_mcp ; test_hardening.py rejoue les attaques connues ; test_real_configs.py couvre le format de chaque outil IA
-examples/           vulnerable-mcp/ (doit déclencher AG101-AG108) et safe-mcp/ (doit rester propre)
+examples/           vulnerable-mcp/ (doit déclencher CW101-CW108) et safe-mcp/ (doit rester propre)
 docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macOS)
 ```
 
@@ -37,22 +39,22 @@ docs/GUIDE-FR.md    Guide d'installation pas à pas pour débutant (Windows/macO
 
 | ID | Gravité | Fichier | Détecte |
 |----|---------|---------|---------|
-| AG001 | critical | rules/secrets.py | Clé API ou token en clair |
-| AG100 | medium | rules/mcp.py | Config MCP illisible (certains outils lancent quand même une partie d'un fichier abîmé) |
-| AG101 | high | rules/mcp.py | Shell qui reçoit un script (`bash -c`, `pwsh -Command`), `cmd /c` avec une ligne de commande ou des caractères spéciaux, code en ligne (`node -e`, `python -c`) |
-| AG102 | medium | rules/mcp.py | Paquet `npx`/`uvx` sans version **exacte** (`^1.0`, `@beta`, `>=1` ne comptent pas) |
-| AG103 | high | rules/mcp.py | Secret littéral dans `env` ou `headers`, y compris mot de passe dans une URL et valeur par défaut de `${VAR:-…}` (références et modèles `<YOUR_KEY>` ignorés) |
-| AG104 | high | rules/mcp.py | Serveur filesystem ouvert sur `/`, un lecteur entier ou un dossier personnel complet |
-| AG105 | high | rules/mcp.py | Serveur distant en `http://` |
-| AG106 | high | rules/mcp.py | Conteneur Docker/Podman qui casse l'isolation (`--privileged`, `=host`, montage de `/`, du dossier personnel, de `.ssh`/`.aws`… ou du socket Docker) |
-| AG107 | high | rules/mcp.py | Paquet installé depuis git, une URL, un raccourci GitHub `auteur/projet` ou `nom @ url` (remplace AG102 pour ce paquet) |
-| AG108 | medium | rules/mcp.py | Outils approuvés sans confirmation (`alwaysAllow`, `autoApprove`, `trust: true`) |
+| CW001 | critical | rules/secrets.py | Clé API ou token en clair |
+| CW100 | medium | rules/mcp.py | Config MCP illisible (certains outils lancent quand même une partie d'un fichier abîmé) |
+| CW101 | high | rules/mcp.py | Shell qui reçoit un script (`bash -c`, `pwsh -Command`), `cmd /c` avec une ligne de commande ou des caractères spéciaux, code en ligne (`node -e`, `python -c`) |
+| CW102 | medium | rules/mcp.py | Paquet `npx`/`uvx` sans version **exacte** (`^1.0`, `@beta`, `>=1` ne comptent pas) |
+| CW103 | high | rules/mcp.py | Secret littéral dans `env` ou `headers`, y compris mot de passe dans une URL et valeur par défaut de `${VAR:-…}` (références et modèles `<YOUR_KEY>` ignorés) |
+| CW104 | high | rules/mcp.py | Serveur filesystem ouvert sur `/`, un lecteur entier ou un dossier personnel complet |
+| CW105 | high | rules/mcp.py | Serveur distant en `http://` |
+| CW106 | high | rules/mcp.py | Conteneur Docker/Podman qui casse l'isolation (`--privileged`, `=host`, montage de `/`, du dossier personnel, de `.ssh`/`.aws`… ou du socket Docker) |
+| CW107 | high | rules/mcp.py | Paquet installé depuis git, une URL, un raccourci GitHub `auteur/projet` ou `nom @ url` (remplace CW102 pour ce paquet) |
+| CW108 | medium | rules/mcp.py | Outils approuvés sans confirmation (`alwaysAllow`, `autoApprove`, `trust: true`) |
 
-Prochain ID libre : **AG002** (secrets) ou **AG110** (MCP). **AG109** est réservé à la règle « l'outil IA approuve tout sans demander » (décidée le 8 octobre 2026).
+Prochain ID libre : **CW002** (secrets) ou **CW110** (MCP). **CW109** est réservé à la règle « l'outil IA approuve tout sans demander » (décidée le 8 octobre 2026).
 
 ## Formats reconnus
 
-agentguard lit **tout fichier `.json` ou `.jsonc`** (commentaires et virgules finales acceptés, voir `jsonc.py`) et cherche les serveurs MCP à ces emplacements. La recherche se fait après la lecture du fichier : un nom de clé écrit avec des échappements ne cache rien.
+configwarden lit **tout fichier `.json` ou `.jsonc`** (commentaires et virgules finales acceptés, voir `jsonc.py`) et cherche les serveurs MCP à ces emplacements. La recherche se fait après la lecture du fichier : un nom de clé écrit avec des échappements ne cache rien.
 
 | Emplacement | Outils |
 |---|---|
@@ -63,9 +65,9 @@ agentguard lit **tout fichier `.json` ou `.jsonc`** (commentaires et virgules fi
 | `context_servers` | Zed (`command` texte, ou objet `{path, args, env}` dans l'ancien format) |
 | `projects.<chemin>.mcpServers` | Claude Code (`~/.claude.json`, serveurs par projet) |
 
-- Fichiers « nommés MCP » (illisibles → AG100) : `mcp.json`, `.mcp.json`, `*.mcp.json`, `mcp_config.json`, `claude_desktop_config.json`, `cline_mcp_settings.json`, `mcp_settings.json`, `mcp-config.json`. Les autres fichiers JSON illisibles restent silencieux.
+- Fichiers « nommés MCP » (illisibles → CW100) : `mcp.json`, `.mcp.json`, `*.mcp.json`, `mcp_config.json`, `claude_desktop_config.json`, `cline_mcp_settings.json`, `mcp_settings.json`, `mcp-config.json`. Les autres fichiers JSON illisibles restent silencieux.
 - Adresses distantes : `url`, `serverUrl` (Windsurf), `httpUrl` (Gemini CLI).
-- **Jamais de silence sur une configuration non auditable** (AG100) : fichier MCP ou JSON d'un dossier d'outil IA (`.vscode/`, `.cursor/`, `.gemini/`, `.claude/`…) trop gros, d'apparence binaire ou lien symbolique ; fichier JSON abîmé qui annonce des serveurs. Un outil tolérant pourrait lancer ce qu'agentguard n'a pas lu.
+- **Jamais de silence sur une configuration non auditable** (CW100) : fichier MCP ou JSON d'un dossier d'outil IA (`.vscode/`, `.cursor/`, `.gemini/`, `.claude/`…) trop gros, d'apparence binaire ou lien symbolique ; fichier JSON abîmé qui annonce des serveurs. Un outil tolérant pourrait lancer ce que configwarden n'a pas lu.
 - Pas encore pris en charge (voir `IDEES.md`) : YAML (Continue), TOML (Codex CLI).
 - Source : documentation officielle de chaque outil, relevée le 8 octobre 2026. À revérifier quand un outil change de format.
 
@@ -78,8 +80,8 @@ pip install -e ".[dev]"                     # installation (une fois)
 pytest                                      # tests
 ruff check . ; ruff format .                # qualité + sécurité (règles Bandit "S")
 pre-commit run --all-files                  # tous les contrôles, dont gitleaks
-agentguard scan examples/vulnerable-mcp     # démo : 10 constats attendus
-agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
+configwarden scan examples/vulnerable-mcp     # démo : 10 constats attendus
+configwarden scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 ```
 
 ## Ajouter une règle (procédure)
@@ -103,7 +105,7 @@ agentguard scan . --exclude "examples/*"    # auto-scan : 0 constat attendu
 
 ## Checklist sécurité (obligatoire pour TOUTE modification)
 
-Fil rouge du projet : agentguard est un outil de sécurité, il doit être lui-même irréprochable. Avant de proposer un changement, vérifier chaque point :
+Fil rouge du projet : configwarden est un outil de sécurité, il doit être lui-même irréprochable. Avant de proposer un changement, vérifier chaque point :
 
 1. **Entrées non fiables** : tout ce qui vient d'un fichier analysé (JSON, texte, noms de fichiers) peut être piégé. Vérifier les types (`isinstance`), ne jamais supposer une structure, et ne jamais laisser une exception arrêter le scan (penser aux fichiers énormes, très imbriqués ou malformés, aux URL invalides, aux fichiers spéciaux).
 2. **Temps de calcul** : jamais de traitement quadratique sur une entrée (une boucle qui relit tout le fichier pour chaque élément, une regex qui peut revenir en arrière). Tester avec une entrée de ~1 Mo construite pour être lente.
@@ -128,5 +130,5 @@ Fil rouge du projet : agentguard est un outil de sécurité, il doit être lui-m
 
 ## État du projet
 
-- Version 0.2.2 publiée (10 règles, deux séries de correctifs de sécurité). v0.3.0 en cours : vrais fichiers de configuration (jour 1), commandes enveloppées et angles morts AG101 à AG107 (jour 2). 357 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
+- Version 0.2.2 publiée (10 règles, deux séries de correctifs de sécurité). v0.3.0 en cours : vrais fichiers de configuration (jour 1), commandes enveloppées et angles morts CW101 à CW107 (jour 2). 357 tests. Notes de version dans `CHANGELOG.md` : à compléter à chaque nouvelle version.
 - Cap fixé jusqu'au 4 novembre 2026 : publier sur GitHub, ajouter 3 règles, faire un premier post. Voir `IDEES.md` pour ce qui est volontairement mis de côté.

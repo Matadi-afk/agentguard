@@ -1,7 +1,7 @@
 import pytest
 
-from agentguard.rules import secrets
-from agentguard.scanner import scan
+from configwarden.rules import secrets
+from configwarden.scanner import scan
 from tests.conftest import fake_secret
 
 CASES = [

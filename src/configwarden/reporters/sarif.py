@@ -1,7 +1,7 @@
 """Rapport SARIF 2.1.0 : le format standard des outils d'analyse de sécurité.
 
 GitHub, GitLab, DefectDojo, VS Code (extension SARIF Viewer)… savent le lire.
-C'est ce qui rend agentguard *complémentaire* des autres outils plutôt
+C'est ce qui rend configwarden *complémentaire* des autres outils plutôt
 que concurrent : ses résultats s'affichent dans leurs tableaux de bord.
 """
 
@@ -10,10 +10,10 @@ from __future__ import annotations
 import json
 from urllib.parse import quote
 
-from agentguard import __version__
-from agentguard.models import Severity
-from agentguard.rules import ALL_RULES
-from agentguard.scanner import ScanResult
+from configwarden import __version__
+from configwarden.models import Severity
+from configwarden.rules import ALL_RULES
+from configwarden.scanner import ScanResult
 
 _SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 _LEVELS = {
@@ -70,9 +70,9 @@ def render_sarif(result: ScanResult, **_: object) -> str:
             {
                 "tool": {
                     "driver": {
-                        "name": "agentguard",
+                        "name": "configwarden",
                         "version": __version__,
-                        "informationUri": "https://github.com/Matadi-afk/agentguard",
+                        "informationUri": "https://github.com/Matadi-afk/configwarden",
                         "rules": rules,
                     }
                 },

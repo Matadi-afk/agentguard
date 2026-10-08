@@ -1,8 +1,8 @@
 """Formats de sortie : texte (humain), JSON (scripts), SARIF (GitHub Security)."""
 
-from agentguard.reporters.json_reporter import render_json
-from agentguard.reporters.sarif import render_sarif
-from agentguard.reporters.text import render_text
+from configwarden.reporters.json_reporter import render_json
+from configwarden.reporters.sarif import render_sarif
+from configwarden.reporters.text import render_text
 
 RENDERERS = {"text": render_text, "json": render_json, "sarif": render_sarif}
 

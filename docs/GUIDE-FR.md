@@ -42,8 +42,8 @@ git config --global init.defaultBranch main
 ## Étape 3 : Ouvrir le projet dans VS Code
 
 1. Récupère le projet dans un dossier de travail (par exemple `Documents/projets/`) :
-   `git clone https://github.com/Matadi-afk/agentguard`
-2. VS Code → *Fichier → Ouvrir le dossier…* → choisis `agentguard`.
+   `git clone https://github.com/Matadi-afk/configwarden`
+2. VS Code → *Fichier → Ouvrir le dossier…* → choisis `configwarden`.
 3. Si VS Code demande **« Faire confiance aux auteurs ? »**, réponds *Oui* uniquement parce que tu connais la provenance du dossier. Garde ce réflexe pour tout projet téléchargé.
 4. Une notification propose les **extensions recommandées** : clique *Installer*.
 
@@ -76,8 +76,8 @@ pip install -e ".[dev]"
 
 ```bash
 pytest
-agentguard scan examples/vulnerable-mcp
-agentguard scan examples/safe-mcp
+configwarden scan examples/vulnerable-mcp
+configwarden scan examples/safe-mcp
 ```
 ✅ **Vérification :** une ligne `… passed` sans aucun `failed` (198 tests en version 0.2.2) ; 10 problèmes sur l'exemple vulnérable ; `No issues found.` sur l'exemple sécurisé.
 
@@ -122,22 +122,22 @@ git rm --cached fuite_test.txt
 
 ## Étape 8 : Personnaliser le projet
 
-✅ Fait : les liens du projet (README, `pyproject.toml`, rapport SARIF) pointent vers `github.com/Matadi-afk/agentguard`.
+✅ Fait : les liens du projet (README, `pyproject.toml`, rapport SARIF) pointent vers `github.com/Matadi-afk/configwarden`.
 
 ## Étape 9 : Premier commit
 
 ```bash
 git add .
 git status          # relis la liste : AUCUN .env, AUCUNE clé
-git commit -m "Initial commit: agentguard scanner MVP"
+git commit -m "Initial commit: configwarden scanner MVP"
 ```
 
 ## Étape 10 : Publier sur GitHub
 
-1. Sur GitHub : **+ → New repository**, nom `agentguard`, **Public**. Ne coche rien (ni README ni licence : on les a déjà).
+1. Sur GitHub : **+ → New repository**, nom `configwarden`, **Public**. Ne coche rien (ni README ni licence : on les a déjà).
 2. Dans le terminal :
    ```bash
-   git remote add origin https://github.com/Matadi-afk/agentguard.git
+   git remote add origin https://github.com/Matadi-afk/configwarden.git
    git push -u origin main
    ```
 3. Une fenêtre de connexion GitHub s'ouvre (Git Credential Manager) : connecte-toi via le navigateur.
@@ -151,7 +151,7 @@ Dans le dépôt, onglet **Settings** :
 - **Rules → Rulesets → New branch ruleset** sur `main` (cible : *Include default branch*) : *Restrict deletions* et *Block force pushes*. N'active *Require status checks to pass* que le jour où tu passes par des pull requests : tant que tu pousses directement sur `main`, cette option bloquerait tes push.
 - **Actions → General → Workflow permissions** : *Read repository contents permission*.
 
-✅ **Vérification :** l'onglet **Actions** montre la CI en vert. L'onglet **Security → Code scanning** affiche les résultats d'agentguard (vides, c'est bon signe).
+✅ **Vérification :** l'onglet **Actions** montre la CI en vert. L'onglet **Security → Code scanning** affiche les résultats de configwarden (vides, c'est bon signe).
 
 ---
 

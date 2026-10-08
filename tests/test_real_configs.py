@@ -1,7 +1,7 @@
 """Tests v0.3.0 : lire les VRAIES configurations des outils IA.
 
 Chaque outil range ses serveurs MCP à sa façon (voir AGENTS.md, « Formats reconnus »).
-Si agentguard devine mal un format, il rate une configuration réelle SANS RIEN DIRE :
+Si configwarden devine mal un format, il rate une configuration réelle SANS RIEN DIRE :
 c'est le pire défaut pour un outil de sécurité (faux sentiment de sécurité).
 
 Sources : documentation officielle de chaque outil, consultée le 8 octobre 2026.
@@ -13,9 +13,9 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from agentguard import jsonc
-from agentguard.rules import mcp
-from agentguard.scanner import scan
+from configwarden import jsonc
+from configwarden.rules import mcp
+from configwarden.scanner import scan
 
 
 def write(root: Path, name: str, text: str) -> Path:
@@ -155,46 +155,46 @@ CLAUDE_USER_FILE = """{
 @pytest.mark.parametrize(
     ("name", "text", "expected"),
     [
-        (".vscode/mcp.json", VSCODE_MCP, ["AG101", "AG105"]),
-        (".vscode/settings.json", VSCODE_LEGACY_SETTINGS, ["AG107"]),
-        (".devcontainer/devcontainer.json", DEVCONTAINER, ["AG105"]),
-        (".zed/settings.json", ZED_SETTINGS, ["AG101", "AG103", "AG107"]),
-        (".gemini/settings.json", GEMINI_SETTINGS, ["AG105", "AG108"]),
-        (".claude.json", CLAUDE_USER_FILE, ["AG105", "AG107"]),
+        (".vscode/mcp.json", VSCODE_MCP, ["CW101", "CW105"]),
+        (".vscode/settings.json", VSCODE_LEGACY_SETTINGS, ["CW107"]),
+        (".devcontainer/devcontainer.json", DEVCONTAINER, ["CW105"]),
+        (".zed/settings.json", ZED_SETTINGS, ["CW101", "CW103", "CW107"]),
+        (".gemini/settings.json", GEMINI_SETTINGS, ["CW105", "CW108"]),
+        (".claude.json", CLAUDE_USER_FILE, ["CW105", "CW107"]),
         (
             "cline_mcp_settings.json",
             '{"mcpServers": {"x": {"command": "srv", "autoApprove": ["write_file"]}}}',
-            ["AG108"],
+            ["CW108"],
         ),
         (
             "mcp_settings.json",
             '{"mcpServers": {"x": {"command": "srv", "alwaysAllow": ["write_file"]}}}',
-            ["AG108"],
+            ["CW108"],
         ),
         (
             ".copilot/mcp-config.json",
             '{"mcpServers": {"x": {"type": "http", "url": "http://evil.example"}}}',
-            ["AG105"],
+            ["CW105"],
         ),
         (
             ".kiro/settings/mcp.json",
             '{"mcpServers": {"x": {"command": "srv", "autoApprove": ["*"]}}}',
-            ["AG108"],
+            ["CW108"],
         ),
         (
             ".kiro/agents/reviewer.json",
             '{"name": "reviewer", "mcpServers": {"k": {"url": "http://evil.example"}}}',
-            ["AG105"],
+            ["CW105"],
         ),
         (
             ".gemini/extensions/demo/gemini-extension.json",
             '{"name": "demo", "mcpServers": {"e": {"url": "http://evil.example"}}}',
-            ["AG105"],
+            ["CW105"],
         ),
         (
             "mcp_config.json",
             '{"mcpServers": {"w": {"serverUrl": "http://evil.example/mcp"}}}',
-            ["AG105"],
+            ["CW105"],
         ),
     ],
     ids=[
@@ -220,7 +220,7 @@ def test_real_client_formats(tmp_path, name, text, expected) -> None:
 
 def test_project_servers_name_their_project(tmp_path) -> None:
     write(tmp_path, ".claude.json", CLAUDE_USER_FILE)
-    messages = [f.message for f in scan(tmp_path).findings if f.rule.id == "AG107"]
+    messages = [f.message for f in scan(tmp_path).findings if f.rule.id == "CW107"]
     assert messages and "/home/dev/app" in messages[0]
 
 
@@ -236,7 +236,7 @@ def test_line_numbers_survive_comments(tmp_path) -> None:
         "}\n"
     )
     write(tmp_path, ".vscode/mcp.json", text)
-    assert [(f.rule.id, f.line) for f in scan(tmp_path).findings] == [("AG105", 6)]
+    assert [(f.rule.id, f.line) for f in scan(tmp_path).findings] == [("CW105", 6)]
 
 
 @pytest.mark.parametrize(
@@ -284,7 +284,7 @@ def test_escaped_key_cannot_hide_servers(tmp_path) -> None:
     # « mcp\u0053ervers » vaut « mcpServers » pour tout lecteur JSON. La détection se
     # fait APRÈS lecture du fichier, jamais sur le texte brut.
     write(tmp_path, "agent.json", '{"mcp\\u0053ervers": {"x": {"url": "http://evil.example"}}}')
-    assert ids(tmp_path) == ["AG105"]
+    assert ids(tmp_path) == ["CW105"]
 
 
 def test_commented_out_values_are_ignored_like_the_client_does(tmp_path) -> None:
@@ -300,26 +300,26 @@ def test_comment_markers_inside_strings_are_kept(tmp_path) -> None:
     text = '{"mcpServers": {"x": {"url": "http://evil.example/*x*/", "args": ["//", "/*"]},},}'
     write(tmp_path, "mcp.json", text)
     findings = scan(tmp_path).findings
-    assert [f.rule.id for f in findings] == ["AG105"]
+    assert [f.rule.id for f in findings] == ["CW105"]
     assert "evil.example" in findings[0].message
 
 
 def test_unterminated_comment_cannot_hide_a_syntax_error(tmp_path) -> None:
     write(tmp_path, "mcp.json", '{"mcpServers": {"a": {"url": "http://e.example"}} /* } }')
-    assert ids(tmp_path) == ["AG100"]
+    assert ids(tmp_path) == ["CW100"]
 
 
 def test_unreadable_mcp_file_is_medium(tmp_path) -> None:
     # Décision du 8 octobre : un outil tolérant aux erreurs peut lancer un serveur
-    # qu'agentguard n'a pas pu lire. Un fichier MCP illisible n'est donc pas anodin.
+    # que configwarden n'a pas pu lire. Un fichier MCP illisible n'est donc pas anodin.
     write(tmp_path, "mcp.json", "{ not json")
     findings = scan(tmp_path).findings
-    assert [(f.rule.id, f.severity.value) for f in findings] == [("AG100", "medium")]
+    assert [(f.rule.id, f.severity.value) for f in findings] == [("CW100", "medium")]
 
 
 def test_deeply_nested_jsonc_does_not_crash(tmp_path) -> None:
     write(tmp_path, "mcp.json", "// x\n" + "[" * 200_000 + "]" * 200_000)
-    assert ids(tmp_path) == ["AG100"]
+    assert ids(tmp_path) == ["CW100"]
 
 
 SERVER = '"mcpServers": {"x": {"url": "http://evil.example"}}'
@@ -328,13 +328,13 @@ SERVER = '"mcpServers": {"x": {"url": "http://evil.example"}}'
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("{" + "/* c */\n" * 100_000 + SERVER + ",}", ["AG105"]),
-        ("{" + SERVER + "} " + "/* " * 300_000, ["AG105"]),
+        ("{" + "/* c */\n" * 100_000 + SERVER + ",}", ["CW105"]),
+        ("{" + SERVER + "} " + "/* " * 300_000, ["CW105"]),
         # « /*/*/ » est un commentaire FERMÉ (comme en C) : la suite est du texte invalide.
-        ("{" + SERVER + "} " + "/*" * 400_000, ["AG100"]),
-        ("{" + '// "\\"\\"\\"\\"\n' * 70_000 + SERVER + "}", ["AG105"]),
-        ('{"a": ' + '"\\"' * 300_000, ["AG100"]),
-        ("{" + SERVER + "," + " " * 900_000 + "}", ["AG105"]),
+        ("{" + SERVER + "} " + "/*" * 400_000, ["CW100"]),
+        ("{" + '// "\\"\\"\\"\\"\n' * 70_000 + SERVER + "}", ["CW105"]),
+        ('{"a": ' + '"\\"' * 300_000, ["CW100"]),
+        ("{" + SERVER + "," + " " * 900_000 + "}", ["CW105"]),
         ("[" + "1," * 400_000 + "]", []),
     ],
     ids=[
@@ -355,18 +355,18 @@ def test_hostile_jsonc_is_fast(tmp_path, text, expected) -> None:
     assert time.perf_counter() - start < 5
 
 
-# --- Ne pas pouvoir cacher un serveur à agentguard (outils tolérants) ----------
+# --- Ne pas pouvoir cacher un serveur à configwarden (outils tolérants) ----------
 #
 # Un outil IA « tolérant » (lecteur qui continue malgré les erreurs, détection de
-# l'encodage, liens suivis) peut charger un fichier qu'agentguard ne lit pas. Un
-# fichier de configuration qu'agentguard ne peut pas auditer doit donc être signalé,
+# l'encodage, liens suivis) peut charger un fichier que configwarden ne lit pas. Un
+# fichier de configuration que configwarden ne peut pas auditer doit donc être signalé,
 # jamais ignoré en silence.
 
 
 def test_raw_control_character_inside_a_string_is_tolerated(tmp_path) -> None:
     text = '{"mcpServers": {"x": {"url": "http://evil.example", "description": "a\tb"}}}'
     write(tmp_path, ".gemini/settings.json", text)
-    assert ids(tmp_path) == ["AG105"]
+    assert ids(tmp_path) == ["CW105"]
 
 
 @pytest.mark.parametrize(
@@ -380,7 +380,7 @@ def test_raw_control_character_inside_a_string_is_tolerated(tmp_path) -> None:
 )
 def test_broken_generic_file_that_declares_servers_is_reported(tmp_path, text) -> None:
     write(tmp_path, ".vscode/settings.json", text)
-    assert ids(tmp_path) == ["AG100"]
+    assert ids(tmp_path) == ["CW100"]
 
 
 @pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
@@ -390,14 +390,14 @@ def test_utf16_and_utf32_files_are_read(tmp_path, encoding) -> None:
     path = tmp_path / ".vscode" / "mcp.json"
     path.parent.mkdir()
     path.write_text('{"servers": {"x": {"url": "http://evil.example"}}}', encoding=encoding)
-    assert ids(tmp_path) == ["AG105"]
+    assert ids(tmp_path) == ["CW105"]
 
 
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
-        ("mcp.json", ["AG100"]),
-        (".vscode/settings.json", ["AG100"]),
+        ("mcp.json", ["CW100"]),
+        (".vscode/settings.json", ["CW100"]),
         ("data/big.json", []),
     ],
     ids=["mcp-named", "client-folder", "ordinary-json"],
@@ -412,7 +412,7 @@ def test_oversized_client_config_is_reported(tmp_path, name, expected) -> None:
 
 def test_binary_looking_mcp_config_is_reported(tmp_path) -> None:
     (tmp_path / "mcp.json").write_bytes(b'{"mcpServers": {}}\0')
-    assert ids(tmp_path) == ["AG100"]
+    assert ids(tmp_path) == ["CW100"]
 
 
 def test_symlinked_client_config_is_reported(tmp_path) -> None:
@@ -427,8 +427,8 @@ def test_symlinked_client_config_is_reported(tmp_path) -> None:
         pytest.skip("symbolic links not available on this system")
     findings = scan(project).findings
     assert sorted((f.rule.id, f.path) for f in findings) == [
-        ("AG100", ".gemini"),
-        ("AG100", ".vscode/mcp.json"),
+        ("CW100", ".gemini"),
+        ("CW100", ".vscode/mcp.json"),
     ]
 
 
@@ -442,4 +442,4 @@ def test_multiline_strings_cannot_slow_down_line_numbers(tmp_path) -> None:
     start = time.perf_counter()
     findings = scan(tmp_path).findings
     assert time.perf_counter() - start < 5
-    assert [(f.rule.id, f.line) for f in findings] == [("AG105", 3)]
+    assert [(f.rule.id, f.line) for f in findings] == [("CW105", 3)]

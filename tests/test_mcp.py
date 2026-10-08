@@ -2,8 +2,8 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from agentguard.rules import mcp
-from agentguard.scanner import scan
+from configwarden.rules import mcp
+from configwarden.scanner import scan
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
@@ -12,7 +12,7 @@ def rule_ids(path: Path) -> list[str]:
     return sorted(f.rule.id for f in scan(path).findings)
 
 
-# --- AG101 : shell --------------------------------------------------------------
+# --- CW101 : shell --------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -26,14 +26,14 @@ def rule_ids(path: Path) -> list[str]:
     ],
 )
 def test_shell_execution_is_flagged(write_mcp, command, args) -> None:
-    assert rule_ids(write_mcp({"s": {"command": command, "args": args}})) == ["AG101"]
+    assert rule_ids(write_mcp({"s": {"command": command, "args": args}})) == ["CW101"]
 
 
 def test_direct_binary_is_fine(write_mcp) -> None:
     assert rule_ids(write_mcp({"s": {"command": "/usr/local/bin/my-server", "args": []}})) == []
 
 
-# --- AG102 : versions non figées ------------------------------------------------
+# --- CW102 : versions non figées ------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -41,7 +41,7 @@ def test_direct_binary_is_fine(write_mcp) -> None:
     ["@modelcontextprotocol/server-github", "some-server", "@scope/pkg@latest", "pkg@next"],
 )
 def test_unpinned_npx_package_is_flagged(write_mcp, package) -> None:
-    assert rule_ids(write_mcp({"s": {"command": "npx", "args": ["-y", package]}})) == ["AG102"]
+    assert rule_ids(write_mcp({"s": {"command": "npx", "args": ["-y", package]}})) == ["CW102"]
 
 
 @pytest.mark.parametrize("package", ["@scope/pkg@1.2.3", "some-server@0.4.0"])
@@ -50,19 +50,19 @@ def test_pinned_npx_package_is_fine(write_mcp, package) -> None:
 
 
 @pytest.mark.parametrize(
-    ("package", "expected"), [("mcp-server==1.0", []), ("mcp-server", ["AG102"])]
+    ("package", "expected"), [("mcp-server==1.0", []), ("mcp-server", ["CW102"])]
 )
 def test_uvx_pinning(write_mcp, package, expected) -> None:
     assert rule_ids(write_mcp({"s": {"command": "uvx", "args": [package]}})) == expected
 
 
-# --- AG103 : secrets dans env / headers -----------------------------------------
+# --- CW103 : secrets dans env / headers -----------------------------------------
 
 
 def test_literal_token_in_env_is_flagged_and_redacted(write_mcp) -> None:
     path = write_mcp({"s": {"command": "srv", "env": {"API_TOKEN": "my-literal-value-123"}}})
     findings = scan(path).findings
-    assert [f.rule.id for f in findings] == ["AG103"]
+    assert [f.rule.id for f in findings] == ["CW103"]
     assert "my-literal-value-123" not in findings[0].message
 
 
@@ -79,13 +79,13 @@ def test_non_sensitive_env_is_ignored(write_mcp) -> None:
     assert rule_ids(path) == []
 
 
-# --- AG104 : accès disque trop large --------------------------------------------
+# --- CW104 : accès disque trop large --------------------------------------------
 
 
 @pytest.mark.parametrize("folder", ["/", "~", "~/", "C:\\", "${userHome}"])
 def test_broad_filesystem_access_is_flagged(write_mcp, folder) -> None:
     args = ["-y", "@modelcontextprotocol/server-filesystem@1.0.0", folder]
-    assert rule_ids(write_mcp({"fs": {"command": "npx", "args": args}})) == ["AG104"]
+    assert rule_ids(write_mcp({"fs": {"command": "npx", "args": args}})) == ["CW104"]
 
 
 def test_project_folder_access_is_fine(write_mcp) -> None:
@@ -93,11 +93,11 @@ def test_project_folder_access_is_fine(write_mcp) -> None:
     assert rule_ids(write_mcp({"fs": {"command": "npx", "args": args}})) == []
 
 
-# --- AG105 : HTTP non chiffré ---------------------------------------------------
+# --- CW105 : HTTP non chiffré ---------------------------------------------------
 
 
 def test_plain_http_remote_is_flagged(write_mcp) -> None:
-    assert rule_ids(write_mcp({"r": {"url": "http://mcp.example.com/sse"}})) == ["AG105"]
+    assert rule_ids(write_mcp({"r": {"url": "http://mcp.example.com/sse"}})) == ["CW105"]
 
 
 @pytest.mark.parametrize("url", ["https://mcp.example.com", "http://localhost:3000/mcp"])
@@ -105,7 +105,7 @@ def test_https_and_localhost_are_fine(write_mcp, url) -> None:
     assert rule_ids(write_mcp({"r": {"url": url}})) == []
 
 
-# --- AG106 : conteneur qui casse son isolation ----------------------------------
+# --- CW106 : conteneur qui casse son isolation ----------------------------------
 
 
 @pytest.mark.parametrize(
@@ -127,17 +127,17 @@ def test_https_and_localhost_are_fine(write_mcp, url) -> None:
 )
 def test_dangerous_container_is_flagged(write_mcp, dangerous) -> None:
     args = ["run", "-i", "--rm", *dangerous, "mcp/server:1.0"]
-    assert rule_ids(write_mcp({"c": {"command": "docker", "args": args}})) == ["AG106"]
+    assert rule_ids(write_mcp({"c": {"command": "docker", "args": args}})) == ["CW106"]
 
 
 def test_each_dangerous_option_is_reported(write_mcp) -> None:
     args = ["run", "--privileged", "-v", "/:/host", "mcp/server:1.0"]
-    assert rule_ids(write_mcp({"c": {"command": "podman", "args": args}})) == ["AG106", "AG106"]
+    assert rule_ids(write_mcp({"c": {"command": "podman", "args": args}})) == ["CW106", "CW106"]
 
 
 def test_nerdctl_is_checked(write_mcp) -> None:
     args = ["run", "--privileged", "mcp/server:1.0"]
-    assert rule_ids(write_mcp({"c": {"command": "nerdctl", "args": args}})) == ["AG106"]
+    assert rule_ids(write_mcp({"c": {"command": "nerdctl", "args": args}})) == ["CW106"]
 
 
 @pytest.mark.parametrize(
@@ -161,7 +161,7 @@ def test_docker_without_run_is_ignored(write_mcp) -> None:
     assert rule_ids(write_mcp({"c": {"command": "docker", "args": args}})) == []
 
 
-# --- AG107 : paquet de source non vérifiée --------------------------------------
+# --- CW107 : paquet de source non vérifiée --------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -175,8 +175,8 @@ def test_docker_without_run_is_ignored(write_mcp) -> None:
     ],
 )
 def test_untrusted_package_source_is_flagged(write_mcp, command, args) -> None:
-    # AG107 remplace AG102 : une seule alerte pour un seul problème.
-    assert rule_ids(write_mcp({"s": {"command": command, "args": args}})) == ["AG107"]
+    # CW107 remplace CW102 : une seule alerte pour un seul problème.
+    assert rule_ids(write_mcp({"s": {"command": command, "args": args}})) == ["CW107"]
 
 
 def test_url_given_to_the_server_is_not_a_package_source(write_mcp) -> None:
@@ -184,19 +184,19 @@ def test_url_given_to_the_server_is_not_a_package_source(write_mcp) -> None:
     assert rule_ids(write_mcp({"s": {"command": "npx", "args": args}})) == []
 
 
-# --- AG108 : outils approuvés automatiquement -----------------------------------
+# --- CW108 : outils approuvés automatiquement -----------------------------------
 
 
 @pytest.mark.parametrize("key", ["alwaysAllow", "autoApprove"])
 def test_auto_approved_tools_are_flagged(write_mcp, key) -> None:
     path = write_mcp({"s": {"command": "srv", key: ["write_file", "run_command"]}})
     findings = scan(path).findings
-    assert [f.rule.id for f in findings] == ["AG108"]
+    assert [f.rule.id for f in findings] == ["CW108"]
     assert "2 tool(s)" in findings[0].message
 
 
 def test_trusted_server_is_flagged(write_mcp) -> None:
-    assert rule_ids(write_mcp({"s": {"command": "srv", "trust": True}})) == ["AG108"]
+    assert rule_ids(write_mcp({"s": {"command": "srv", "trust": True}})) == ["CW108"]
 
 
 @pytest.mark.parametrize("server", [{"alwaysAllow": []}, {"trust": False}, {}])
@@ -209,12 +209,12 @@ def test_confirmation_kept_is_fine(write_mcp, server) -> None:
 
 def test_vscode_servers_format_is_supported(write_mcp) -> None:
     path = write_mcp({"r": {"url": "http://evil.example"}}, name=".vscode/mcp.json", key="servers")
-    assert rule_ids(path) == ["AG105"]
+    assert rule_ids(path) == ["CW105"]
 
 
 def test_invalid_json_is_reported(tmp_path) -> None:
     (tmp_path / "mcp.json").write_text("{ not json", encoding="utf-8")
-    assert rule_ids(tmp_path) == ["AG100"]
+    assert rule_ids(tmp_path) == ["CW100"]
 
 
 @pytest.mark.parametrize(
@@ -236,7 +236,7 @@ def test_mcp_file_detection(name, expected) -> None:
 
 def test_vulnerable_example_triggers_every_mcp_rule() -> None:
     ids = set(rule_ids(EXAMPLES / "vulnerable-mcp"))
-    expected = {"AG101", "AG102", "AG103", "AG104", "AG105", "AG106", "AG107", "AG108"}
+    expected = {"CW101", "CW102", "CW103", "CW104", "CW105", "CW106", "CW107", "CW108"}
     assert expected <= ids
 
 

@@ -2,7 +2,7 @@ import pickle
 
 import pytest
 
-from agentguard.config import MissingSecretError, Secret, get_secret
+from configwarden.config import MissingSecretError, Secret, get_secret
 
 
 def test_secret_is_hidden_when_printed() -> None:

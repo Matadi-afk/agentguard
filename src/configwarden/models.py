@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import Enum
 
-from agentguard.redact import sanitize
+from configwarden.redact import sanitize
 
 
 class Severity(str, Enum):

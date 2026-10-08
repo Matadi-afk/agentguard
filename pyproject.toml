@@ -8,14 +8,14 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentguard"
+name = "configwarden"
 version = "0.2.2"
 description = "Security scanner for AI agent configurations (MCP servers, secrets, supply chain)."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-authors = [{ name = "agentguard contributors" }]
+authors = [{ name = "configwarden contributors" }]
 keywords = ["security", "mcp", "ai-agents", "llm", "secrets", "sarif", "devsecops"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -40,15 +40,15 @@ dev = [
 ]
 
 [project.scripts]
-# Crée la commande `agentguard` dans le terminal.
-agentguard = "agentguard.cli:main"
+# Crée la commande `configwarden` dans le terminal.
+configwarden = "configwarden.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Matadi-afk/agentguard"
-Issues = "https://github.com/Matadi-afk/agentguard/issues"
+Homepage = "https://github.com/Matadi-afk/configwarden"
+Issues = "https://github.com/Matadi-afk/configwarden/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentguard"]
+packages = ["src/configwarden"]
 
 # Sécurité : liste BLANCHE des fichiers de l'archive source (sdist).
 # Sans elle, tout fichier local non ignoré par Git (notes, exports, .env mal

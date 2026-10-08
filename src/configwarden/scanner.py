@@ -18,8 +18,8 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from agentguard.models import Finding
-from agentguard.rules import mcp, secrets
+from configwarden.models import Finding
+from configwarden.rules import mcp, secrets
 
 MAX_FILE_SIZE = 1_000_000  # 1 Mo
 _BINARY_SNIFF_SIZE = 8192
@@ -142,7 +142,7 @@ def scan(target: str | Path, excludes: Iterable[str] = ()) -> ScanResult:
         result.files_skipped += 1
 
     def report_symlinked_config(path: Path) -> None:
-        # Un outil IA suit les liens ; agentguard non (ils peuvent sortir du projet).
+        # Un outil IA suit les liens ; configwarden non (ils peuvent sortir du projet).
         # Une configuration atteinte par un lien ne doit donc pas passer inaperçue.
         relative = PurePosixPath(path.relative_to(base).as_posix())
         if mcp.is_client_config_path(relative):

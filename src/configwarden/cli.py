@@ -1,10 +1,10 @@
 """Interface en ligne de commande.
 
 Exemples :
-    agentguard scan .
-    agentguard scan . --format sarif --output agentguard.sarif
-    agentguard scan . --fail-on high --exclude "examples/*"
-    agentguard rules
+    configwarden scan .
+    configwarden scan . --format sarif --output configwarden.sarif
+    configwarden scan . --fail-on high --exclude "examples/*"
+    configwarden rules
 
 Codes de sortie (utiles en CI) :
     0 = aucun problème au niveau demandé
@@ -19,22 +19,22 @@ import os
 import sys
 from pathlib import Path
 
-from agentguard import __version__
-from agentguard.models import Severity
-from agentguard.redact import sanitize
-from agentguard.reporters import RENDERERS
-from agentguard.rules import ALL_RULES
-from agentguard.scanner import scan
+from configwarden import __version__
+from configwarden.models import Severity
+from configwarden.redact import sanitize
+from configwarden.reporters import RENDERERS
+from configwarden.rules import ALL_RULES
+from configwarden.scanner import scan
 
 EXIT_OK, EXIT_FINDINGS, EXIT_ERROR = 0, 1, 2
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="agentguard",
+        prog="configwarden",
         description="Security scanner for AI agent configurations (MCP, secrets).",
     )
-    parser.add_argument("--version", action="version", version=f"agentguard {__version__}")
+    parser.add_argument("--version", action="version", version=f"configwarden {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     scan_cmd = sub.add_parser("scan", help="Scan a file or a directory.")
@@ -86,7 +86,7 @@ def _write_report(path: Path, report: str, roots: list[Path]) -> None:
     """Écrit le rapport sans jamais suivre un lien symbolique.
 
     Sécurité : en CI, le rapport est écrit DANS le dépôt analysé, qui n'est pas
-    fiable. Un lien « agentguard.sarif -> ../../fichier » ferait écraser un autre
+    fiable. Un lien « configwarden.sarif -> ../../fichier » ferait écraser un autre
     fichier de la machine, tout comme un dossier « reports -> ../.. ».
     O_NOFOLLOW (Linux, macOS) protège aussi le dernier élément pendant l'ouverture.
     """
@@ -120,7 +120,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     try:
         result = scan(args.path, excludes=args.exclude)
     except FileNotFoundError as error:
-        print(f"agentguard: error: {sanitize(str(error))}", file=sys.stderr)
+        print(f"configwarden: error: {sanitize(str(error))}", file=sys.stderr)
         return EXIT_ERROR
 
     to_file = bool(args.output)
@@ -130,7 +130,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         try:
             _write_report(Path(args.output), report, roots=[Path.cwd(), Path(args.path)])
         except OSError as error:
-            print(f"agentguard: error: {sanitize(str(error))}", file=sys.stderr)
+            print(f"configwarden: error: {sanitize(str(error))}", file=sys.stderr)
             return EXIT_ERROR
         shown = sanitize(args.output)
         print(f"Report written to {shown} ({len(result.findings)} finding(s)).")

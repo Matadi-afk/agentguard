@@ -4,7 +4,7 @@ Un serveur est souvent lancé à travers une « enveloppe » : `cmd /c npx …` 
 `wsl …`, `env VAR=1 …`, `sudo …`, `bash -c "…"`. Pour vérifier le programme qui
 tourne VRAIMENT (paquet figé ? source fiable ?), on retire ces enveloppes une à une.
 
-Au passage, on relève ce qui permet d'exécuter n'importe quoi (règle AG101) :
+Au passage, on relève ce qui permet d'exécuter n'importe quoi (règle CW101) :
 - un shell qui reçoit un script (`bash -c`, `sh -lc`, `pwsh -Command`…) ;
 - `cmd /c` avec une ligne de commande (un seul texte, ou des caractères spéciaux
   & | < > ^ % !) ; `cmd /c` qui lance un programme en morceaux séparés est accepté
@@ -68,7 +68,7 @@ _MAX_WORDS = 200
 
 @dataclass
 class Launch:
-    """Résultat de l'analyse : la commande vraiment lancée et les risques AG101."""
+    """Résultat de l'analyse : la commande vraiment lancée et les risques CW101."""
 
     tokens: list[str]
     risks: list[str] = field(default_factory=list)
@@ -241,7 +241,7 @@ def _metacharacters_from(tokens: list[str]) -> list[bool]:
 
 
 def analyse(command: str, args: list[str]) -> Launch:
-    """Retire les enveloppes et relève les risques AG101 d'une ligne de commande."""
+    """Retire les enveloppes et relève les risques CW101 d'une ligne de commande."""
     tokens = [command, *args]
     start = 0
     risks: list[str] = []

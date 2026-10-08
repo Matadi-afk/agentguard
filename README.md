@@ -1,42 +1,44 @@
-# agentguard
+# configwarden
 
 **Security scanner for AI agent configurations.** Finds hardcoded secrets, dangerous MCP server setups and supply-chain risks before they reach production.
 
-[![CI](https://github.com/Matadi-afk/agentguard/actions/workflows/ci.yml/badge.svg)](https://github.com/Matadi-afk/agentguard/actions/workflows/ci.yml)
+[![CI](https://github.com/Matadi-afk/configwarden/actions/workflows/ci.yml/badge.svg)](https://github.com/Matadi-afk/configwarden/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-AI agents (Claude, Cursor, VS Code Copilot…) are increasingly wired to tools through the **Model Context Protocol (MCP)**. One bad config line can hand an agent, or anyone who hijacks it through prompt injection, a shell on your machine or your whole home directory. `agentguard` catches these mistakes in seconds.
+AI agents (Claude, Cursor, VS Code Copilot…) are increasingly wired to tools through the **Model Context Protocol (MCP)**. One bad config line can hand an agent, or anyone who hijacks it through prompt injection, a shell on your machine or your whole home directory. `configwarden` catches these mistakes in seconds.
 
 - **Zero runtime dependencies**: nothing extra to trust.
 - **Never prints a secret in full**: reports are safe to share in CI logs.
 - **SARIF output**: results show up natively in GitHub Code Scanning and other security dashboards.
 
+*Formerly named `agentguard`: renamed in October 2026 because that name was too close to other projects. Releases up to v0.2.2 use the old name.*
+
 ## Quick start
 
-Requires Python 3.10+. The package is not on PyPI yet: install a tagged release from GitHub.
+Requires Python 3.10+.
 
 ```bash
-pip install "git+https://github.com/Matadi-afk/agentguard@v0.2.2"
-agentguard scan .
+pip install configwarden==0.3.0
+configwarden scan .
 ```
 
 ### Try it on the bundled example
 
 ```bash
-git clone https://github.com/Matadi-afk/agentguard
-cd agentguard
+git clone https://github.com/Matadi-afk/configwarden
+cd configwarden
 pip install .
-agentguard scan examples/vulnerable-mcp   # 10 findings
-agentguard scan examples/safe-mcp         # the fixed version: no issues
+configwarden scan examples/vulnerable-mcp   # 10 findings
+configwarden scan examples/safe-mcp         # the fixed version: no issues
 ```
 
 ```text
-[HIGH] AG106 MCP server container escapes isolation
+[HIGH] CW106 MCP server container escapes isolation
     mcp.json:25  Server 'sandbox' runs a container with a mount of '/var/run/docker.sock'.
     Fix: Remove --privileged, host namespaces and mounts of '/', the home directory or the Docker socket. ...
 
-[HIGH] AG101 MCP server runs through a shell
+[HIGH] CW101 MCP server runs through a shell
     mcp.json:15  Server 'helper' executes commands through 'bash'.
     Fix: Call the server binary directly instead of `bash -c` / `cmd /c`. ...
 
@@ -49,22 +51,22 @@ Every value in `examples/` is a fake placeholder.
 
 | ID | Severity | What it detects |
 |----|----------|-----------------|
-| AG001 | critical | API keys and tokens written in clear (Anthropic, OpenAI, GitHub, AWS, Google, Hugging Face, Slack, Stripe, private keys) |
-| AG100 | medium | MCP config that cannot be parsed (some clients still run the servers they can read from a broken file) |
-| AG101 | high | Shell running a script (`bash -c`, `pwsh -Command`), `cmd /c` with a command line or special characters, inline code (`node -e`, `python -c`) |
-| AG102 | medium | `npx` / `uvx` package without an exact version (`^1.0`, `@beta`, `>=1` are not pinned) |
-| AG103 | high | Secret written literally in an MCP server's `env` or `headers`, including passwords inside URLs |
-| AG104 | high | Filesystem server exposed to `/`, a whole drive or a whole home directory |
-| AG105 | high | Remote MCP server reached over plain `http://` |
-| AG106 | high | Docker/Podman server with `--privileged`, host namespaces, or mounts of `/`, the home directory, `.ssh`/`.aws`… or the Docker socket |
-| AG107 | high | Package installed from git, a URL or a GitHub shorthand instead of the npm / PyPI registry |
-| AG108 | medium | Tools auto-approved (`alwaysAllow`, `autoApprove`, `trust: true`): no human confirmation |
+| CW001 | critical | API keys and tokens written in clear (Anthropic, OpenAI, GitHub, AWS, Google, Hugging Face, Slack, Stripe, private keys) |
+| CW100 | medium | MCP config that cannot be parsed (some clients still run the servers they can read from a broken file) |
+| CW101 | high | Shell running a script (`bash -c`, `pwsh -Command`), `cmd /c` with a command line or special characters, inline code (`node -e`, `python -c`) |
+| CW102 | medium | `npx` / `uvx` package without an exact version (`^1.0`, `@beta`, `>=1` are not pinned) |
+| CW103 | high | Secret written literally in an MCP server's `env` or `headers`, including passwords inside URLs |
+| CW104 | high | Filesystem server exposed to `/`, a whole drive or a whole home directory |
+| CW105 | high | Remote MCP server reached over plain `http://` |
+| CW106 | high | Docker/Podman server with `--privileged`, host namespaces, or mounts of `/`, the home directory, `.ssh`/`.aws`… or the Docker socket |
+| CW107 | high | Package installed from git, a URL or a GitHub shorthand instead of the npm / PyPI registry |
+| CW108 | medium | Tools auto-approved (`alwaysAllow`, `autoApprove`, `trust: true`): no human confirmation |
 
-Run `agentguard rules` to list them from the CLI.
+Run `configwarden rules` to list them from the CLI.
 
 ## Supported configuration files
 
-agentguard reads every `.json` / `.jsonc` file (comments and trailing commas allowed) and looks for MCP servers wherever each AI client keeps them:
+configwarden reads every `.json` / `.jsonc` file (comments and trailing commas allowed) and looks for MCP servers wherever each AI client keeps them:
 
 | Client | Where the servers live |
 |---|---|
@@ -81,7 +83,7 @@ Wrapped commands are unwrapped before being checked: `cmd /c npx …`, `wsl …`
 ## Usage
 
 ```bash
-agentguard scan PATH [--format text|json|sarif] [--output FILE]
+configwarden scan PATH [--format text|json|sarif] [--output FILE]
                      [--fail-on low|medium|high|critical] [--exclude GLOB]...
 ```
 
@@ -91,7 +93,7 @@ Exit codes: `0` nothing at or above `--fail-on`, `1` findings, `2` usage error.
 
 ```yaml
 jobs:
-  agentguard:
+  configwarden:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -101,12 +103,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install "git+https://github.com/Matadi-afk/agentguard@v0.2.2"
-      - run: agentguard scan . --format sarif --output agentguard.sarif
+      - run: pip install configwarden==0.3.0
+      - run: configwarden scan . --format sarif --output configwarden.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: agentguard.sarif
+          sarif_file: configwarden.sarif
 ```
 
 Results then appear in the repository's **Security → Code scanning** tab.

@@ -1,4 +1,4 @@
-"""Règle AG001 : secrets (clés API, tokens) écrits en clair dans un fichier.
+"""Règle CW001 : secrets (clés API, tokens) écrits en clair dans un fichier.
 
 Chaque motif (regex) reconnaît le format officiel d'un type de clé.
 On reste volontairement strict pour éviter les faux positifs.
@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import re
 
-from agentguard.models import Finding, Rule, Severity
-from agentguard.redact import redact
+from configwarden.models import Finding, Rule, Severity
+from configwarden.redact import redact
 
 HARDCODED_SECRET = Rule(
-    id="AG001",
+    id="CW001",
     title="Hardcoded secret",
     severity=Severity.CRITICAL,
     remediation=(

@@ -40,7 +40,7 @@ htmlcov/
 
 # --- Résultats de scan (peuvent contenir des chemins ou infos sensibles) --------
 *.sarif
-agentguard-report.*
+configwarden-report.*
 
 # --- Systèmes et éditeurs ------------------------------------------------------
 .DS_Store
